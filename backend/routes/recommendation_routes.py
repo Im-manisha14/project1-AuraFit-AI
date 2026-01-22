@@ -54,6 +54,9 @@ def get_recommendation_history():
     
     try:
         user_id = get_jwt_identity()
+        if not user_id:
+            return jsonify({'error': 'Invalid token'}), 401
+            
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         

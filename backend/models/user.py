@@ -15,7 +15,7 @@ class User(db.Model):
     # Relationships
     profile = db.relationship('UserProfile', backref='user', uselist=False, cascade='all, delete-orphan')
     preferences = db.relationship('StylePreference', backref='user', uselist=False, cascade='all, delete-orphan')
-    feedbacks = db.relationship('UserFeedback', backref='user', cascade='all, delete-orphan')
+    feedbacks = db.relationship('UserFeedback', backref='user', cascade='all, delete-orphan', lazy='dynamic')
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

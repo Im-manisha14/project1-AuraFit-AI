@@ -90,6 +90,9 @@ def get_current_user():
     
     try:
         user_id = get_jwt_identity()
+        if not user_id:
+            return jsonify({'error': 'Invalid token'}), 401
+            
         user = User.query.get(user_id)
         
         if not user:

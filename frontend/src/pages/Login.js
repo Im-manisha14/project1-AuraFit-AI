@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { motion } from 'framer-motion';
+import { FiMail, FiLock, FiArrowRight } from 'react-icons/fi';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -16,82 +18,123 @@ const Login = () => {
     setError('');
     setLoading(true);
 
-    const result = await login(email, password);
+    try {
+      const result = await login(email, password);
 
-    if (result.success) {
-      navigate('/dashboard');
-    } else {
-      setError(result.error);
+      if (result.success) {
+        setTimeout(() => {
+          navigate('/dashboard', { replace: true });
+        }, 100);
+      } else {
+        setError(result.error);
+        setLoading(false);
+      }
+    } catch (err) {
+      setError('An unexpected error occurred');
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full">
-        <div className="card">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold gradient-bg bg-clip-text text-transparent">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
+      <motion.div 
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+        className="max-w-md w-full"
+      >
+        <div className="bg-white border border-gray-200 p-10 shadow-sm">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2, duration: 0.6 }}
+            className="text-center mb-10"
+          >
+            <h1 className="text-3xl font-bold text-gray-900 mb-3 tracking-tight">
               Welcome Back
             </h1>
-            <p className="text-gray-600 mt-2">Login to StyleSync</p>
-          </div>
+            <p className="text-gray-600 font-light">Sign in to your luxury fashion experience</p>
+          </motion.div>
 
           {error && (
-            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            <motion.div 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 mb-6 text-sm"
+            >
               {error}
-            </div>
+            </motion.div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">
-                Email
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3, duration: 0.6 }}
+            >
+              <label className="block text-gray-900 font-medium mb-3 text-sm tracking-wide uppercase flex items-center space-x-2">
+                <FiMail className="text-amber-600" />
+                <span>Email Address</span>
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="input-field"
+                className="w-full px-4 py-4 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900"
                 placeholder="your.email@example.com"
                 required
               />
-            </div>
+            </motion.div>
 
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">
-                Password
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.4, duration: 0.6 }}
+            >
+              <label className="block text-gray-900 font-medium mb-3 text-sm tracking-wide uppercase flex items-center space-x-2">
+                <FiLock className="text-amber-600" />
+                <span>Password</span>
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input-field"
-                placeholder="••••••••"
+                className="w-full px-4 py-4 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900"
+                placeholder="••••••••••"
                 required
               />
-            </div>
+            </motion.div>
 
-            <button
+            <motion.button
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5, duration: 0.6 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               type="submit"
-              className="btn-primary w-full"
+              className="group w-full bg-gray-900 text-white py-4 font-medium text-sm tracking-widest uppercase hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
               disabled={loading}
             >
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
+              <span>{loading ? 'Signing In...' : 'Sign In'}</span>
+              {!loading && <FiArrowRight className="group-hover:translate-x-1 transition-transform" />}
+            </motion.button>
           </form>
 
-          <div className="mt-6 text-center">
-            <p className="text-gray-600">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6, duration: 0.6 }}
+            className="mt-8 text-center"
+          >
+            <p className="text-gray-600 font-light">
               Don't have an account?{' '}
-              <Link to="/register" className="text-purple-600 font-semibold hover:text-purple-800">
-                Register here
+              <Link to="/register" className="text-amber-600 font-medium hover:text-amber-700 transition-colors">
+                Create Account
               </Link>
             </p>
-          </div>
+          </motion.div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

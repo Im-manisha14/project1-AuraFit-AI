@@ -6,6 +6,7 @@ bp = Blueprint('user', __name__, url_prefix='/api/users')
 @bp.route('/profile', methods=['GET'])
 @jwt_required()
 def get_profile():
+    from extensions import db
     from models.user import UserProfile
     
     try:
@@ -13,11 +14,15 @@ def get_profile():
         profile = UserProfile.query.filter_by(user_id=user_id).first()
         
         if not profile:
-            return jsonify({'error': 'Profile not found'}), 404
+            # Create default profile
+            profile = UserProfile(user_id=user_id)
+            db.session.add(profile)
+            db.session.commit()
         
         return jsonify({'profile': profile.to_dict()}), 200
         
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/profile', methods=['POST', 'PUT'])
@@ -64,6 +69,7 @@ def update_profile():
 @bp.route('/preferences', methods=['GET'])
 @jwt_required()
 def get_preferences():
+    from extensions import db
     from models.user import StylePreference
     
     try:
@@ -71,11 +77,22 @@ def get_preferences():
         preferences = StylePreference.query.filter_by(user_id=user_id).first()
         
         if not preferences:
-            return jsonify({'error': 'Preferences not found'}), 404
+            # Create default preferences
+            preferences = StylePreference(
+                user_id=user_id,
+                preferred_colors=[],
+                preferred_styles=[],
+                avoided_patterns=[],
+                comfort_level='medium',
+                preferred_occasions=[]
+            )
+            db.session.add(preferences)
+            db.session.commit()
         
         return jsonify({'preferences': preferences.to_dict()}), 200
         
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/preferences', methods=['POST', 'PUT'])

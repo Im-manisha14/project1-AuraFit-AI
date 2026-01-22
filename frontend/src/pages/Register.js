@@ -45,7 +45,7 @@ const Register = () => {
     });
 
     if (result.success) {
-      navigate('/profile');
+      navigate('/dashboard');
     } else {
       setError(result.error);
     }
@@ -58,8 +58,11 @@ const Register = () => {
       <div className="max-w-md w-full">
         <div className="card">
           <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <img src="/logo.svg" alt="AuraFit" className="h-16 w-16" />
+            </div>
             <h1 className="text-4xl font-bold gradient-bg bg-clip-text text-transparent">
-              Join StyleSync
+              Join AuraFit
             </h1>
             <p className="text-gray-600 mt-2">Create your account</p>
           </div>

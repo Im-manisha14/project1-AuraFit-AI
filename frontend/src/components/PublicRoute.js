@@ -2,7 +2,7 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const PrivateRoute = ({ children }) => {
+const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
@@ -16,7 +16,8 @@ const PrivateRoute = ({ children }) => {
     );
   }
 
-  return isAuthenticated ? children : <Navigate to="/login" />;
+  // If user is authenticated, redirect to dashboard
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children;
 };
 
-export default PrivateRoute;
+export default PublicRoute;

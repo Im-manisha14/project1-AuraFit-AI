@@ -1,5 +1,9 @@
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models.user import User, UserProfile, StylePreference
+    from models.outfit import Outfit
 
 class RecommendationEngine:
     """

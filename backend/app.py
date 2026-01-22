@@ -14,6 +14,27 @@ def create_app():
     db.init_app(app)
     jwt = JWTManager(app)
     
+    # JWT error handlers
+    @jwt.invalid_token_loader
+    def invalid_token_callback(error_string):
+        return jsonify({'error': 'Invalid token', 'message': error_string}), 401
+    
+    @jwt.unauthorized_loader
+    def unauthorized_callback(error_string):
+        return jsonify({'error': 'Missing authorization token', 'message': error_string}), 401
+    
+    @jwt.expired_token_loader
+    def expired_token_callback(jwt_header, jwt_data):
+        return jsonify({'error': 'Token has expired', 'message': 'Please login again'}), 401
+    
+    @jwt.revoked_token_loader
+    def revoked_token_callback(jwt_header, jwt_data):
+        return jsonify({'error': 'Token has been revoked', 'message': 'Please login again'}), 401
+    
+    # Import models to register them with SQLAlchemy
+    with app.app_context():
+        from models import user, outfit
+    
     # Import and register blueprints
     from routes import auth_routes, user_routes, outfit_routes, recommendation_routes
     
@@ -25,7 +46,7 @@ def create_app():
     @app.route('/')
     def index():
         return jsonify({
-            'message': 'Welcome to StyleSync API',
+            'message': 'Welcome to AuraFit API',
             'version': '1.0.0',
             'status': 'running'
         })

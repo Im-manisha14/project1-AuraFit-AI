@@ -1,15 +1,17 @@
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Config:
     # Flask config
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     DEBUG = os.environ.get('DEBUG', 'True') == 'True'
     
-    # Database config (SQLite)
-    basedir = os.path.abspath(os.path.dirname(__file__))
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-        'sqlite:///' + os.path.join(basedir, 'stylesync.db')
+    # Database config (PostgreSQL) - FORCED
+    SQLALCHEMY_DATABASE_URI = 'postgresql://postgres:Manisha14@localhost:5432/aurafit'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # JWT config

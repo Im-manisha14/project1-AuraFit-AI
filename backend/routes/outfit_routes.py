@@ -104,7 +104,6 @@ def submit_feedback(outfit_id):
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/trending', methods=['GET'])
-@jwt_required()
 def get_trending():
     from models.outfit import Outfit
     

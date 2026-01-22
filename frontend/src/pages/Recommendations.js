@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { recommendationAPI } from '../services/api';
+import { motion } from 'framer-motion';
+import { FiStar, FiTrendingUp } from 'react-icons/fi';
 
 const Recommendations = () => {
   const navigate = useNavigate();
@@ -35,10 +37,21 @@ const Recommendations = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-4xl font-bold mb-8">✨ Personalized Recommendations</h1>
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+      >
+        <h1 className="text-4xl font-bold mb-8">✨ Personalized Recommendations</h1>
+      </motion.div>
 
       {/* Filters */}
-      <div className="card mb-8">
+      <motion.div 
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8, delay: 0.2 }}
+        className="card mb-8"
+      >
         <h2 className="text-2xl font-bold mb-4">Customize Your Recommendations</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
@@ -101,17 +114,29 @@ const Recommendations = () => {
         >
           {loading ? 'Generating...' : '🎯 Generate Recommendations'}
         </button>
-      </div>
+      </motion.div>
 
       {/* Results */}
       {recommendations.length > 0 && (
-        <div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6 }}
+        >
           <h2 className="text-2xl font-bold mb-4">
             Your Top {recommendations.length} Matches
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {recommendations.map((rec, index) => (
-              <div key={index} className="card hover:transform hover:scale-105 transition">
+              <motion.div 
+                key={index} 
+                initial={{ opacity: 0, y: 50 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={{ duration: 0.6, delay: index * 0.1 }}
+                whileHover={{ y: -8, scale: 1.02 }}
+                className="card"
+              >
                 <div className="flex justify-between items-start mb-4">
                   <span className="text-3xl font-bold text-purple-600">#{index + 1}</span>
                   <span className="text-2xl font-bold text-green-600">
@@ -170,10 +195,10 @@ const Recommendations = () => {
                 >
                   View Details
                 </button>
-              </div>
+              </motion.div>
             ))}
           </div>
-        </div>
+        </motion.div>
       )}
 
       {recommendations.length === 0 && !loading && (
