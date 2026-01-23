@@ -11,6 +11,7 @@ def get_profile():
     
     try:
         user_id = get_jwt_identity()
+        print(f"[PROFILE] Getting profile for user_id: {user_id}")
         profile = UserProfile.query.filter_by(user_id=user_id).first()
         
         if not profile:

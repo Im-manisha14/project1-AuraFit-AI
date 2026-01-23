@@ -29,12 +29,16 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await authAPI.getCurrentUser();
       setUser(response.data.user);
+      console.log('✓ Auth verified, user:', response.data.user.email);
     } catch (error) {
-      console.error('Auth check failed:', error);
-      // Clear invalid tokens
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      setUser(null);
+      console.error('✗ Auth check failed:', error.response?.status, error.message);
+      // Clear invalid tokens immediately
+      if (error.response?.status === 401 || error.response?.status === 422) {
+        console.warn('Clearing invalid tokens - please login again');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        setUser(null);
+      }
     }
     setLoading(false);
   };
@@ -47,6 +51,9 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('access_token', access_token);
       localStorage.setItem('refresh_token', refresh_token);
       setUser(user);
+      
+      console.log('Login successful, user:', user);
+      console.log('Token stored:', access_token ? 'Yes' : 'No');
       
       return { success: true };
     } catch (error) {
@@ -65,6 +72,9 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('access_token', access_token);
       localStorage.setItem('refresh_token', refresh_token);
       setUser(user);
+      
+      console.log('Registration successful, user:', user);
+      console.log('Token stored:', access_token ? 'Yes' : 'No');
       
       return { success: true };
     } catch (error) {

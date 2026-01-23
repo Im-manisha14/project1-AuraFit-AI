@@ -38,16 +38,32 @@ const Trends = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      {/* Hero Section */}
+      {/* Hero Section with Luxury Fashion Store Background */}
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1 }}
-        className="relative bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white py-20 overflow-hidden"
+        className="relative text-white py-24 overflow-hidden"
+        style={{
+          backgroundImage: 'url(https://images.unsplash.com/photo-1441984904996-e0b6ba687e04?q=80&w=2070)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        }}
       >
-        {/* Decorative elements */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-amber-600 opacity-10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-amber-600 opacity-10 rounded-full blur-3xl"></div>
+        {/* Elegant dark overlay with gradient */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/75 to-black/70"></div>
+        
+        {/* Decorative elements with animation */}
+        <div className="absolute inset-0">
+          <div className="absolute top-10 right-10 w-80 h-80 bg-amber-600 opacity-10 rounded-full blur-3xl animate-pulse"></div>
+          <div className="absolute bottom-10 left-10 w-96 h-96 bg-amber-500 opacity-5 rounded-full blur-3xl"></div>
+        </div>
+        
+        {/* Premium pattern overlay */}
+        <div className="absolute inset-0 opacity-5" style={{
+          backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(255,255,255,.03) 35px, rgba(255,255,255,.03) 70px)'
+        }}></div>
         
         <div className="container mx-auto px-6 relative z-10">
           <motion.div
@@ -59,16 +75,31 @@ const Trends = () => {
             <motion.div 
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
-              transition={{ duration: 0.5, type: "spring" }}
+              transition={{ duration: 0.5, type: "spring", delay: 0.3 }}
               className="inline-block mb-6"
             >
-              <FiTrendingUp className="text-6xl text-amber-500 mx-auto" />
+              <FiTrendingUp className="text-7xl text-amber-500 mx-auto drop-shadow-lg" />
             </motion.div>
             
-            <h1 className="text-6xl font-bold mb-6 tracking-tight">Fashion Trends 2026</h1>
-            <p className="text-xl text-gray-300 font-light leading-relaxed max-w-2xl mx-auto">
-              Discover the hottest fashion trends and stay ahead of the curve with our curated collection of luxury styles
-            </p>
+            <motion.h1 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ duration: 0.8, delay: 0.4 }}
+              className="text-6xl font-bold mb-6 tracking-tight drop-shadow-lg"
+            >
+              Fashion Trends 2026
+            </motion.h1>
+            
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ duration: 0.8, delay: 0.5 }}
+            >
+              <div className="w-24 h-1 bg-amber-600 mx-auto mb-6"></div>
+              <p className="text-xl text-gray-200 font-light leading-relaxed max-w-2xl mx-auto drop-shadow-md">
+                Discover the hottest fashion trends and stay ahead of the curve with our curated collection of luxury styles
+              </p>
+            </motion.div>
             
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -77,7 +108,7 @@ const Trends = () => {
               className="mt-8 flex items-center justify-center space-x-2 text-amber-500"
             >
               <div className="w-12 h-px bg-amber-500"></div>
-              <span className="text-sm tracking-widest uppercase">Curated for Excellence</span>
+              <span className="text-sm tracking-widest uppercase drop-shadow-md">Curated for Excellence</span>
               <div className="w-12 h-px bg-amber-500"></div>
             </motion.div>
           </motion.div>
@@ -212,10 +243,23 @@ const Trends = () => {
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                       />
                     ) : (
-                      <div className="flex flex-col items-center justify-center h-full">
-                        <FiShoppingBag className="text-7xl text-gray-400 mb-3" />
-                        <span className="text-gray-500 font-light text-sm">Premium Collection</span>
-                      </div>
+                      <img
+                        src={
+                          index === 0 
+                            ? 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=2020' // Elegant women's fashion
+                            : index === 1 
+                            ? 'https://images.unsplash.com/photo-1617137968427-85924c800a22?q=80&w=2070' // Minimalist modern outfit
+                            : index === 2 
+                            ? 'https://images.unsplash.com/photo-1523398002811-999ca8dec234?q=80&w=2005' // Summer casual wear
+                            : index === 3
+                            ? 'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?q=80&w=2070' // Men's formal wear
+                            : index === 4
+                            ? 'https://images.unsplash.com/photo-1539533018447-63fcce2678e3?q=80&w=2070' // Luxury accessories
+                            : 'https://images.unsplash.com/photo-1529374255404-311a2a4f1fd9?q=80&w=2069' // Designer collection
+                        }
+                        alt={outfit.name}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                      />
                     )}
                     
                     {/* Gradient Overlay */}

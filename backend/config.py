@@ -14,10 +14,13 @@ class Config:
     SQLALCHEMY_DATABASE_URI = 'postgresql://postgres:Manisha14@localhost:5432/aurafit'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # JWT config
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'jwt-secret-key-change-in-production'
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
+    # JWT config - MUST match for tokens to work
+    JWT_SECRET_KEY = 'dev-secret-key-change-in-production'
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+    JWT_TOKEN_LOCATION = ['headers']
+    JWT_HEADER_NAME = 'Authorization'
+    JWT_HEADER_TYPE = 'Bearer'
     
     # CORS config
     CORS_HEADERS = 'Content-Type'

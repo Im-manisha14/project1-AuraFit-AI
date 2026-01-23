@@ -22,9 +22,7 @@ const Login = () => {
       const result = await login(email, password);
 
       if (result.success) {
-        setTimeout(() => {
-          navigate('/dashboard', { replace: true });
-        }, 100);
+        navigate('/dashboard', { replace: true });
       } else {
         setError(result.error);
         setLoading(false);

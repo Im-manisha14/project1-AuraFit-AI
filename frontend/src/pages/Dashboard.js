@@ -95,7 +95,7 @@ const Dashboard = () => {
               <FiArrowRight className="group-hover:translate-x-1 transition-transform" />
             </Link>
             <Link 
-              to="/profile" 
+              to="/recommendations" 
               className="group bg-amber-600 text-white px-8 py-4 font-medium text-sm tracking-widest uppercase hover:bg-amber-700 transition-all duration-300 flex items-center space-x-2"
             >
               <FiShoppingBag />
