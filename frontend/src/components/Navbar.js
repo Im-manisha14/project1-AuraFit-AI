@@ -16,7 +16,7 @@ const Navbar = () => {
       <div className="container mx-auto px-6">
         <div className="flex justify-between items-center py-4">
           {/* Elegant Logo */}
-          <Link to="/dashboard" className="flex items-center space-x-3">
+          <Link to="/" className="flex items-center space-x-3">
             <img src="/logo.svg" alt="AuraFit" className="h-10 w-10" />
             <span className="text-xl font-bold text-gray-800 tracking-wide">AuraFit</span>
           </Link>

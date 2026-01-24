@@ -23,7 +23,8 @@ function App() {
         <div className="App min-h-screen">
           <Navbar />
           <Routes>
-            {/* Public Routes - redirect to dashboard if authenticated */}
+            <Route path="/" element={<Navigate to="/login" replace />} />
+            
             <Route
               path="/login"
               element={
@@ -41,7 +42,6 @@ function App() {
               }
             />
             
-            {/* Protected Routes */}
             <Route
               path="/dashboard"
               element={
@@ -82,8 +82,6 @@ function App() {
                 </PrivateRoute>
               }
             />
-            
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>
       </Router>

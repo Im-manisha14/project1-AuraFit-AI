@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { userAPI } from '../services/api';
+import axios from 'axios';
 
 const Profile = () => {
+  const navigate = useNavigate();
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  
   const [profile, setProfile] = useState({
     height: '',
     weight: '',
@@ -10,16 +17,12 @@ const Profile = () => {
     gender: '',
     skin_tone: '',
   });
-  const [preferences, setPreferences] = useState({
-    preferred_colors: [],
-    preferred_styles: [],
-    avoided_patterns: [],
-    comfort_level: 'medium',
-    preferred_occasions: [],
-  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [showCamera, setShowCamera] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [detectionResult, setDetectionResult] = useState(null);
 
   useEffect(() => {
     loadProfileData();
@@ -27,16 +30,10 @@ const Profile = () => {
 
   const loadProfileData = async () => {
     try {
-      const [profileRes, prefsRes] = await Promise.all([
-        userAPI.getProfile().catch(() => ({ data: { profile: {} } })),
-        userAPI.getPreferences().catch(() => ({ data: { preferences: {} } })),
-      ]);
+      const profileRes = await userAPI.getProfile().catch(() => ({ data: { profile: {} } }));
 
       if (profileRes.data.profile) {
         setProfile(profileRes.data.profile);
-      }
-      if (prefsRes.data.preferences) {
-        setPreferences(prefsRes.data.preferences);
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -52,37 +49,122 @@ const Profile = () => {
     });
   };
 
-  const handlePreferenceChange = (e) => {
-    const { name, value } = e.target;
-    if (name.includes('_')) {
-      // Handle array fields
-      const values = value.split(',').map((v) => v.trim());
-      setPreferences({
-        ...preferences,
-        [name]: values,
-      });
-    } else {
-      setPreferences({
-        ...preferences,
-        [name]: value,
-      });
-    }
-  };
-
   const handleSave = async () => {
     setSaving(true);
     setMessage('');
 
     try {
-      await Promise.all([
-        userAPI.updateProfile(profile),
-        userAPI.updatePreferences(preferences),
-      ]);
+      await userAPI.updateProfile(profile);
       setMessage('Profile updated successfully! ✅');
+      // Redirect to recommendations page after 1 second
+      setTimeout(() => {
+        navigate('/recommendations');
+      }, 1000);
     } catch (error) {
       setMessage('Error updating profile. Please try again. ❌');
-    } finally {
       setSaving(false);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        
+        // Wait for video to be ready
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play();
+        };
+      }
+      
+      setShowCamera(true);
+      setMessage('📸 Position your palm facing the camera in good lighting');
+    } catch (error) {
+      setMessage('❌ Camera access denied. Please enable camera permissions.');
+      console.error('Camera error:', error);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    setShowCamera(false);
+    setDetectionResult(null);
+  };
+
+  const captureAndDetect = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    // Check if video is ready
+    const video = videoRef.current;
+    if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+      setMessage('⏳ Camera is loading... Please wait a moment.');
+      return;
+    }
+    
+    setDetecting(true);
+    setMessage('🔍 Analyzing hand skin tone...');
+
+    try {
+      const canvas = canvasRef.current;
+      
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Convert to base64 with higher quality
+      const imageData = canvas.toDataURL('image/jpeg', 0.95);
+      
+      // Send to backend
+      const token = localStorage.getItem('access_token');
+      const response = await axios.post(
+        'http://localhost:5000/api/ai/detect-skin-tone',
+        { image: imageData },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.data.success) {
+        const result = response.data;
+        
+        // Update profile with detected skin tone
+        setProfile({
+          ...profile,
+          skin_tone: result.skin_tone,
+        });
+        
+        setDetectionResult(result);
+        setMessage(`✅ Skin tone detected: ${result.skin_tone}!`);
+        
+        // Stop camera after successful detection
+        setTimeout(() => {
+          stopCamera();
+        }, 2000);
+      } else {
+        setMessage(`❌ ${response.data.error}`);
+      }
+    } catch (error) {
+      console.error('Detection error:', error);
+      const errorMsg = error.response?.data?.error || 'Detection failed. Please try again with better lighting.';
+      setMessage(`❌ ${errorMsg}`);
+    } finally {
+      setDetecting(false);
     }
   };
 
@@ -190,90 +272,120 @@ const Profile = () => {
             <label className="block text-gray-700 font-semibold mb-2">
               Skin Tone
             </label>
-            <input
-              type="text"
-              name="skin_tone"
-              value={profile.skin_tone || ''}
-              onChange={handleProfileChange}
-              className="input-field"
-              placeholder="Fair, Medium, Dark"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                name="skin_tone"
+                value={profile.skin_tone || ''}
+                onChange={handleProfileChange}
+                className="input-field flex-1"
+                placeholder="Fair, Light, Medium, Olive, Deep"
+                readOnly
+              />
+              <button
+                type="button"
+                onClick={showCamera ? stopCamera : startCamera}
+                className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-colors whitespace-nowrap"
+              >
+                {showCamera ? '❌ Close' : '� Analyze Tone'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Use AI to detect your skin tone from your hand
+            </p>
           </div>
         </div>
-      </div>
 
-      {/* Style Preferences */}
-      <div className="card mb-8">
-        <h2 className="text-2xl font-bold mb-4">🎨 Style Preferences</h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Preferred Colors (comma-separated)
-            </label>
-            <input
-              type="text"
-              name="preferred_colors"
-              value={preferences.preferred_colors?.join(', ') || ''}
-              onChange={handlePreferenceChange}
-              className="input-field"
-              placeholder="blue, black, white, green"
-            />
+        {/* Camera Modal */}
+        {showCamera && (
+          <div className="mt-6 p-6 bg-gradient-to-br from-purple-50 to-blue-50 rounded-lg border-2 border-purple-300 shadow-lg">
+            <h3 className="text-xl font-bold mb-2 text-center text-purple-800">
+              🤚 Hand Skin Tone Detection
+            </h3>
+            <p className="text-sm text-gray-700 text-center mb-4">
+              For best results:
+            </p>
+            <ul className="text-xs text-gray-600 mb-4 space-y-1 max-w-md mx-auto">
+              <li>✓ Use natural daylight or bright white light</li>
+              <li>✓ Show your palm facing the camera</li>
+              <li>✓ Keep your hand steady and fill the guide frame</li>
+              <li>✓ Avoid shadows on your hand</li>
+            </ul>
+            
+            <div className="relative max-w-md mx-auto">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full rounded-lg border-4 border-purple-400 shadow-md bg-black"
+                style={{ minHeight: '300px' }}
+              />
+              
+              {/* Enhanced hand guide overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-56 h-64 border-4 border-dashed border-white rounded-xl flex items-center justify-center bg-black bg-opacity-20">
+                  <div className="text-center">
+                    <div className="text-6xl mb-2">🖐️</div>
+                    <span className="text-white text-sm font-semibold bg-black bg-opacity-60 px-3 py-2 rounded-lg">
+                      Center your palm here
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <canvas ref={canvasRef} className="hidden" />
+
+            <div className="flex gap-3 mt-4 justify-center">
+              <button
+                type="button"
+                onClick={captureAndDetect}
+                disabled={detecting}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 font-medium"
+              >
+                {detecting ? '🔍 Analyzing...' : '✨ Detect Skin Tone'}
+              </button>
+              <button
+                type="button"
+                onClick={stopCamera}
+                className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+
+            {/* Detection Result */}
+            {detectionResult && (
+              <div className="mt-4 p-4 bg-white rounded-lg border border-green-200">
+                <h4 className="font-bold text-green-700 mb-2">
+                  ✅ Detection Successful!
+                </h4>
+                <div className="space-y-2 text-sm">
+                  <p>
+                    <strong>Skin Tone:</strong> {detectionResult.skin_tone}
+                  </p>
+                  <p>
+                    <strong>Brightness:</strong> {detectionResult.brightness}
+                  </p>
+                  <div>
+                    <strong>Recommended Colors:</strong>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {detectionResult.recommended_colors?.map((color, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs"
+                        >
+                          {color}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Preferred Styles (comma-separated)
-            </label>
-            <input
-              type="text"
-              name="preferred_styles"
-              value={preferences.preferred_styles?.join(', ') || ''}
-              onChange={handlePreferenceChange}
-              className="input-field"
-              placeholder="casual, formal, sporty, bohemian"
-            />
-          </div>
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Avoided Patterns (comma-separated)
-            </label>
-            <input
-              type="text"
-              name="avoided_patterns"
-              value={preferences.avoided_patterns?.join(', ') || ''}
-              onChange={handlePreferenceChange}
-              className="input-field"
-              placeholder="stripes, polka-dots"
-            />
-          </div>
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Comfort Level
-            </label>
-            <select
-              name="comfort_level"
-              value={preferences.comfort_level || 'medium'}
-              onChange={handlePreferenceChange}
-              className="input-field"
-            >
-              <option value="low">Low (Style over comfort)</option>
-              <option value="medium">Medium (Balanced)</option>
-              <option value="high">High (Comfort first)</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-gray-700 font-semibold mb-2">
-              Preferred Occasions (comma-separated)
-            </label>
-            <input
-              type="text"
-              name="preferred_occasions"
-              value={preferences.preferred_occasions?.join(', ') || ''}
-              onChange={handlePreferenceChange}
-              className="input-field"
-              placeholder="work, party, casual, gym, date"
-            />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Save Button */}

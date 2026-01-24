@@ -17,18 +17,22 @@ def create_app():
     # JWT error handlers
     @jwt.invalid_token_loader
     def invalid_token_callback(error_string):
+        print(f"[JWT] Invalid token: {error_string}")
         return jsonify({'error': 'Invalid token', 'message': error_string}), 401
     
     @jwt.unauthorized_loader
     def unauthorized_callback(error_string):
+        print(f"[JWT] Unauthorized: {error_string}")
         return jsonify({'error': 'Missing authorization token', 'message': error_string}), 401
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_data):
+        print(f"[JWT] Token expired for user: {jwt_data.get('sub', 'unknown')}")
         return jsonify({'error': 'Token has expired', 'message': 'Please login again'}), 401
     
     @jwt.revoked_token_loader
     def revoked_token_callback(jwt_header, jwt_data):
+        print(f"[JWT] Token revoked for user: {jwt_data.get('sub', 'unknown')}")
         return jsonify({'error': 'Token has been revoked', 'message': 'Please login again'}), 401
     
     # Import models to register them with SQLAlchemy
@@ -36,12 +40,13 @@ def create_app():
         from models import user, outfit
     
     # Import and register blueprints
-    from routes import auth_routes, user_routes, outfit_routes, recommendation_routes
+    from routes import auth_routes, user_routes, outfit_routes, recommendation_routes, ai_routes
     
     app.register_blueprint(auth_routes.bp)
     app.register_blueprint(user_routes.bp)
     app.register_blueprint(outfit_routes.bp)
     app.register_blueprint(recommendation_routes.bp)
+    app.register_blueprint(ai_routes.bp)
     
     @app.route('/')
     def index():

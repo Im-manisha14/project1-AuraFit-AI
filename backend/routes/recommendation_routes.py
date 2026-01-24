@@ -10,7 +10,9 @@ def generate_recommendations():
     from services.recommendation_engine import RecommendationEngine
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         data = request.get_json()
         
         # Get user data
@@ -53,7 +55,9 @@ def get_recommendation_history():
     from models.outfit import Recommendation
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         if not user_id:
             return jsonify({'error': 'Invalid token'}), 401
             
@@ -80,7 +84,9 @@ def get_recommendation(recommendation_id):
     from models.outfit import Recommendation
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         
         recommendation = Recommendation.query.filter_by(
             id=recommendation_id,

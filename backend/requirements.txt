@@ -24,6 +24,7 @@ bcrypt==4.1.2
 
 # Image processing
 Pillow==10.1.0
+opencv-python==4.8.1.78
 
 # API documentation
 flask-swagger-ui==4.11.1

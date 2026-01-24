@@ -22,6 +22,8 @@ const Login = () => {
       const result = await login(email, password);
 
       if (result.success) {
+        // Small delay to ensure token is properly stored
+        await new Promise(resolve => setTimeout(resolve, 100));
         navigate('/dashboard', { replace: true });
       } else {
         setError(result.error);

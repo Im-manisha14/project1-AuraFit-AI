@@ -5,13 +5,14 @@ import { useAuth } from '../context/AuthContext';
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
+  const hasToken = !!localStorage.getItem('access_token');
 
   console.log('[PrivateRoute]', {
     loading,
     isAuthenticated,
     hasUser: !!user,
+    hasToken,
     path: location.pathname,
-    hasToken: !!localStorage.getItem('access_token')
   });
 
   if (loading) {
@@ -25,11 +26,14 @@ const PrivateRoute = ({ children }) => {
     );
   }
 
-  if (!isAuthenticated) {
+  // Allow access if user has a token, even if checkAuth hasn't completed yet
+  // This prevents the race condition where tokens exist but user state hasn't loaded
+  if (!isAuthenticated && !hasToken) {
     console.warn('[PrivateRoute] Not authenticated - redirecting to login');
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  return isAuthenticated ? children : <Navigate to="/login" state={{ from: location }} replace />;
+  return children;
 };
 
 export default PrivateRoute;

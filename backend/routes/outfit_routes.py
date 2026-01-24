@@ -61,7 +61,9 @@ def submit_feedback(outfit_id):
     from models.outfit import Outfit, UserFeedback
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         data = request.get_json()
         
         outfit = Outfit.query.get(outfit_id)

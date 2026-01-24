@@ -32,6 +32,12 @@ api.interceptors.response.use(
 
     // Only handle 401 errors, not network errors
     if (error.response?.status === 401 && !originalRequest._retry) {
+      // Don't retry if this is already a refresh or login request
+      if (originalRequest.url?.includes('/auth/refresh') || 
+          originalRequest.url?.includes('/auth/login')) {
+        return Promise.reject(error);
+      }
+
       originalRequest._retry = true;
 
       try {
@@ -53,15 +59,18 @@ api.interceptors.response.use(
         const { access_token } = response.data;
         localStorage.setItem('access_token', access_token);
 
+        // Update the original request with new token
         originalRequest.headers.Authorization = `Bearer ${access_token}`;
         return api(originalRequest);
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError);
+        // Clear tokens and redirect only if refresh truly failed
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        
         // Only redirect to login if we're not already on a public page
         if (!window.location.pathname.includes('/login') && 
             !window.location.pathname.includes('/register')) {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
           window.location.href = '/login';
         }
         return Promise.reject(refreshError);

@@ -32,9 +32,9 @@ export const AuthProvider = ({ children }) => {
       console.log('✓ Auth verified, user:', response.data.user.email);
     } catch (error) {
       console.error('✗ Auth check failed:', error.response?.status, error.message);
-      // Clear invalid tokens immediately
+      // If token is invalid format or expired, clear and require re-login
       if (error.response?.status === 401 || error.response?.status === 422) {
-        console.warn('Clearing invalid tokens - please login again');
+        console.warn('Token invalid - clearing storage');
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         setUser(null);
@@ -91,12 +91,24 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  const refreshAuth = async () => {
+    try {
+      const response = await authAPI.getCurrentUser();
+      setUser(response.data.user);
+      return true;
+    } catch (error) {
+      console.error('Failed to refresh auth:', error);
+      return false;
+    }
+  };
+
   const value = {
     user,
     loading,
     login,
     register,
     logout,
+    refreshAuth,
     isAuthenticated: !!user,
   };
 

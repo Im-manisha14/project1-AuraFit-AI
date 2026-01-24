@@ -10,19 +10,29 @@ def get_profile():
     from models.user import UserProfile
     
     try:
-        user_id = get_jwt_identity()
-        print(f"[PROFILE] Getting profile for user_id: {user_id}")
+        user_id_str = get_jwt_identity()
+        print(f"[USER /profile] Getting profile for user_id: {user_id_str}")
+        
+        if not user_id_str:
+            print("[USER /profile] ERROR: No user_id from token")
+            return jsonify({'error': 'Invalid token'}), 401
+        
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         profile = UserProfile.query.filter_by(user_id=user_id).first()
         
         if not profile:
             # Create default profile
+            print(f"[USER /profile] Creating new profile for user_id: {user_id}")
             profile = UserProfile(user_id=user_id)
             db.session.add(profile)
             db.session.commit()
         
+        print(f"[USER /profile] SUCCESS: Returning profile for user_id: {user_id}")
         return jsonify({'profile': profile.to_dict()}), 200
         
     except Exception as e:
+        print(f"[USER /profile] ERROR: {str(e)}")
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
@@ -33,7 +43,9 @@ def update_profile():
     from models.user import UserProfile
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         data = request.get_json()
         
         profile = UserProfile.query.filter_by(user_id=user_id).first()
@@ -74,7 +86,9 @@ def get_preferences():
     from models.user import StylePreference
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         preferences = StylePreference.query.filter_by(user_id=user_id).first()
         
         if not preferences:
@@ -103,7 +117,9 @@ def update_preferences():
     from models.user import StylePreference
     
     try:
-        user_id = get_jwt_identity()
+        user_id_str = get_jwt_identity()
+        # Convert string identity back to int
+        user_id = int(user_id_str)
         data = request.get_json()
         
         preferences = StylePreference.query.filter_by(user_id=user_id).first()
