@@ -1,6 +1,7 @@
 """
 AuraFit Hand Skin Tone Detection Module
 Uses MediaPipe and OpenCV for accurate hand-only skin tone detection
+Optimized for back-of-hand detection for better skin tone accuracy
 """
 
 import cv2
@@ -48,7 +49,7 @@ class HandSkinToneDetector:
             if hand_mask is None:
                 return {
                     'success': False,
-                    'error': 'No hand detected. Please show your palm clearly in good lighting with hand filling the frame.'
+                    'error': 'No hand detected. Please show the back of your hand clearly in good lighting with hand filling at least 20% of the frame.'
                 }
             
             print(f"[HandDetector] Hand detected successfully")
@@ -96,42 +97,49 @@ class HandSkinToneDetector:
         """
         Detect hand region using advanced skin color thresholding
         Works in various lighting conditions and for all skin tones
+        Optimized for back of hand detection
         """
-        # Convert to HSV color space
+        # Convert to multiple color spaces for better detection  
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
         
-        # Define multiple skin color ranges in HSV for better detection
-        # Range 1: Light skin tones (lower saturation)
-        lower_skin1 = np.array([0, 20, 70], dtype=np.uint8)
-        upper_skin1 = np.array([20, 255, 255], dtype=np.uint8)
+        # HSV-based detection (improved ranges)
+        # Range 1: Very light skin tones
+        lower_skin1 = np.array([0, 15, 50], dtype=np.uint8) 
+        upper_skin1 = np.array([25, 255, 255], dtype=np.uint8)
         
-        # Range 2: Darker skin tones and different lighting
-        lower_skin2 = np.array([0, 15, 50], dtype=np.uint8)
-        upper_skin2 = np.array([25, 200, 255], dtype=np.uint8)
+        # Range 2: Medium skin tones
+        lower_skin2 = np.array([0, 10, 40], dtype=np.uint8)
+        upper_skin2 = np.array([30, 200, 255], dtype=np.uint8)
         
-        # Range 3: Additional range for orange-red tones
-        lower_skin3 = np.array([0, 10, 60], dtype=np.uint8)
-        upper_skin3 = np.array([30, 170, 255], dtype=np.uint8)
+        # Range 3: Darker skin tones
+        lower_skin3 = np.array([0, 8, 30], dtype=np.uint8)
+        upper_skin3 = np.array([35, 180, 255], dtype=np.uint8)
         
-        # Create masks for each range
-        mask1 = cv2.inRange(hsv, lower_skin1, upper_skin1)
-        mask2 = cv2.inRange(hsv, lower_skin2, upper_skin2)
-        mask3 = cv2.inRange(hsv, lower_skin3, upper_skin3)
+        # YCrCb-based detection (more reliable for skin)
+        lower_ycrcb = np.array([0, 133, 77], dtype=np.uint8)
+        upper_ycrcb = np.array([255, 173, 127], dtype=np.uint8)
+        
+        # Create masks
+        mask_hsv1 = cv2.inRange(hsv, lower_skin1, upper_skin1)
+        mask_hsv2 = cv2.inRange(hsv, lower_skin2, upper_skin2) 
+        mask_hsv3 = cv2.inRange(hsv, lower_skin3, upper_skin3)
+        mask_ycrcb = cv2.inRange(ycrcb, lower_ycrcb, upper_ycrcb)
         
         # Combine all masks
-        mask = cv2.bitwise_or(mask1, mask2)
-        mask = cv2.bitwise_or(mask, mask3)
+        mask_hsv = cv2.bitwise_or(mask_hsv1, mask_hsv2)
+        mask_hsv = cv2.bitwise_or(mask_hsv, mask_hsv3)
+        mask = cv2.bitwise_or(mask_hsv, mask_ycrcb)
         
-        # Apply morphological operations to clean up the mask
-        # Use larger kernel for better noise removal
-        kernel_open = np.ones((7, 7), np.uint8)
-        kernel_close = np.ones((11, 11), np.uint8)
+        # Apply morphological operations with optimized kernels
+        kernel_open = np.ones((5, 5), np.uint8)  # Smaller for better detail
+        kernel_close = np.ones((15, 15), np.uint8)  # Larger for filling gaps
         
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open, iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close, iterations=2)
         
         # Apply Gaussian blur to smooth edges
-        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        mask = cv2.GaussianBlur(mask, (3, 3), 0)
         
         # Find contours
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -139,8 +147,8 @@ class HandSkinToneDetector:
         if not contours:
             return None
         
-        # Filter contours by area - remove very small detections
-        valid_contours = [c for c in contours if cv2.contourArea(c) > 2000]
+        # Filter contours by area - more lenient threshold
+        valid_contours = [c for c in contours if cv2.contourArea(c) > 1000]  # Reduced from 2000
         
         if not valid_contours:
             return None
@@ -152,16 +160,16 @@ class HandSkinToneDetector:
         x, y, w, h = cv2.boundingRect(largest_contour)
         aspect_ratio = float(w) / h if h > 0 else 0
         
-        # Hand should not be too elongated (between 0.3 and 3.0)
-        if aspect_ratio < 0.2 or aspect_ratio > 5.0:
+        # Hand should not be too elongated (more lenient for back of hand)
+        if aspect_ratio < 0.15 or aspect_ratio > 6.0:  # More lenient ranges
             return None
         
         # Create final mask with only the largest contour
         hand_mask = np.zeros(mask.shape, dtype=np.uint8)
         cv2.drawContours(hand_mask, [largest_contour], -1, 255, -1)
         
-        # Final area check - ensure minimum 3% of image
-        min_area = (image.shape[0] * image.shape[1]) * 0.03
+        # Final area check - ensure minimum 2% of image (reduced from 3%)
+        min_area = (image.shape[0] * image.shape[1]) * 0.02
         if cv2.contourArea(largest_contour) < min_area:
             return None
         

@@ -71,8 +71,9 @@ const Profile = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 1920, min: 640 },  // Higher resolution
+          height: { ideal: 1080, min: 480 },
+          frameRate: { ideal: 30 }  // Better frame rate
         } 
       });
       
@@ -87,7 +88,7 @@ const Profile = () => {
       }
       
       setShowCamera(true);
-      setMessage('📸 Position your palm facing the camera in good lighting');
+      setMessage('📸 Position the back of your hand facing the camera in good lighting');
     } catch (error) {
       setMessage('❌ Camera access denied. Please enable camera permissions.');
       console.error('Camera error:', error);
@@ -124,8 +125,10 @@ const Profile = () => {
       const context = canvas.getContext('2d');
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      // Convert to base64 with higher quality
-      const imageData = canvas.toDataURL('image/jpeg', 0.95);
+      // Convert to base64 with high quality
+      const imageData = canvas.toDataURL('image/jpeg', 0.98);  // Higher quality
+      
+      console.log('Captured image size:', imageData.length, 'Canvas size:', canvas.width, 'x', canvas.height);
       
       // Send to backend
       const token = localStorage.getItem('access_token');
@@ -161,7 +164,16 @@ const Profile = () => {
       }
     } catch (error) {
       console.error('Detection error:', error);
-      const errorMsg = error.response?.data?.error || 'Detection failed. Please try again with better lighting.';
+      let errorMsg = 'Detection failed. Please try again.';
+      
+      if (error.response?.data?.error) {
+        errorMsg = error.response.data.error;
+      } else if (error.message.includes('Network')) {
+        errorMsg = 'Network error. Please check your connection.';
+      } else if (error.message.includes('timeout')) {
+        errorMsg = 'Request timed out. Please try with better lighting.';
+      }
+      
       setMessage(`❌ ${errorMsg}`);
     } finally {
       setDetecting(false);
@@ -300,16 +312,17 @@ const Profile = () => {
         {showCamera && (
           <div className="mt-6 p-6 bg-gradient-to-br from-purple-50 to-blue-50 rounded-lg border-2 border-purple-300 shadow-lg">
             <h3 className="text-xl font-bold mb-2 text-center text-purple-800">
-              🤚 Hand Skin Tone Detection
+              ✋ Hand Skin Tone Detection
             </h3>
             <p className="text-sm text-gray-700 text-center mb-4">
               For best results:
             </p>
             <ul className="text-xs text-gray-600 mb-4 space-y-1 max-w-md mx-auto">
               <li>✓ Use natural daylight or bright white light</li>
-              <li>✓ Show your palm facing the camera</li>
+              <li>✓ Show the BACK of your hand facing the camera</li>
               <li>✓ Keep your hand steady and fill the guide frame</li>
               <li>✓ Avoid shadows on your hand</li>
+              <li>✓ Ensure your hand fills at least 30% of the frame</li>
             </ul>
             
             <div className="relative max-w-md mx-auto">
@@ -326,9 +339,9 @@ const Profile = () => {
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-56 h-64 border-4 border-dashed border-white rounded-xl flex items-center justify-center bg-black bg-opacity-20">
                   <div className="text-center">
-                    <div className="text-6xl mb-2">🖐️</div>
+                    <div className="text-6xl mb-2">🤚</div>
                     <span className="text-white text-sm font-semibold bg-black bg-opacity-60 px-3 py-2 rounded-lg">
-                      Center your palm here
+                      Center back of hand here
                     </span>
                   </div>
                 </div>
