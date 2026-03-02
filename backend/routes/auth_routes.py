@@ -13,14 +13,20 @@ def register():
         
         # Validate input
         if not data.get('email') or not data.get('password') or not data.get('username'):
-            return jsonify({'error': 'Missing required fields'}), 400
+            return jsonify({'error': 'Missing required fields: email, username, and password are required'}), 400
+        
+        # Validate email format
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, data['email']):
+            return jsonify({'error': 'Invalid email format'}), 400
         
         # Check if user exists
         if User.query.filter_by(email=data['email']).first():
-            return jsonify({'error': 'Email already registered'}), 400
+            return jsonify({'error': 'This email is already registered. Please use a different email or try logging in.'}), 400
         
         if User.query.filter_by(username=data['username']).first():
-            return jsonify({'error': 'Username already taken'}), 400
+            return jsonify({'error': 'This username is already taken. Please choose a different username.'}), 400
         
         # Create new user
         user = User(

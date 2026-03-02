@@ -18,6 +18,8 @@ def detect_skin_tone():
     
     Expects JSON with:
         - image: base64 encoded image string
+        OR
+        - rgb: [R, G, B] array for direct color input
     
     Returns:
         - skin_tone: Classification (Fair, Light, Medium, Olive, Deep)
@@ -31,15 +33,20 @@ def detect_skin_tone():
         
         data = request.get_json()
         
-        if not data or 'image' not in data:
-            return jsonify({'error': 'No image data provided'}), 400
-        
-        image_data = data['image']
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
         
         print(f"[AI] Processing skin tone detection for user {user_id}")
         
-        # Detect skin tone
-        result = detector.detect_skin_from_image(image_data)
+        # Check if RGB values are provided directly
+        if 'rgb' in data and isinstance(data['rgb'], list) and len(data['rgb']) == 3:
+            print(f"[AI] Using direct RGB input: {data['rgb']}")
+            result = detector.detect_from_rgb(data['rgb'])
+        elif 'image' in data:
+            print(f"[AI] Using camera image detection")
+            result = detector.detect_skin_from_image(data['image'])
+        else:
+            return jsonify({'error': 'No image data or RGB values provided'}), 400
         
         if not result.get('success', False):
             print(f"[AI] Detection failed: {result.get('error')}")
@@ -51,6 +58,8 @@ def detect_skin_tone():
         
     except Exception as e:
         print(f"[AI] Error in skin tone detection: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': f'Server error: {str(e)}'

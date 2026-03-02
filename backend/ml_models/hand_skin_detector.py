@@ -14,11 +14,11 @@ class HandSkinToneDetector:
     
     def __init__(self):
         self.skin_tone_categories = {
-            'fair': {'range': (0, 50), 'colors': ['lavender', 'pastel blue', 'soft pink']},
-            'light': {'range': (51, 100), 'colors': ['peach', 'beige', 'mint green']},
-            'medium': {'range': (101, 150), 'colors': ['emerald', 'teal', 'mustard']},
-            'olive': {'range': (151, 180), 'colors': ['earth tones', 'maroon', 'cream']},
-            'deep': {'range': (181, 255), 'colors': ['royal blue', 'yellow', 'white']}
+            'fair': {'range': (200, 255), 'colors': ['lavender', 'pastel blue', 'soft pink']},
+            'light': {'range': (170, 199), 'colors': ['peach', 'beige', 'mint green']},
+            'medium': {'range': (140, 169), 'colors': ['emerald', 'teal', 'mustard']},
+            'olive': {'range': (110, 139), 'colors': ['earth tones', 'maroon', 'cream']},
+            'deep': {'range': (0, 109), 'colors': ['royal blue', 'yellow', 'white']}
         }
     
     def detect_skin_from_image(self, image_data: str) -> dict:
@@ -43,9 +43,14 @@ class HandSkinToneDetector:
             
             print(f"[HandDetector] Processing image of size: {image.shape}")
             
-            # Detect hand region
+            # Detect hand region with improved algorithm
             hand_mask = self._detect_hand_region(image)
             
+            if hand_mask is None:
+                print(f"[HandDetector] Hand detection failed - trying fallback method")
+                # Fallback: try to detect any skin-colored region
+                hand_mask = self._detect_skin_fallback(image)
+                
             if hand_mask is None:
                 return {
                     'success': False,
@@ -60,7 +65,7 @@ class HandSkinToneDetector:
             # Classify skin tone
             skin_tone, brightness = self._classify_skin_tone(skin_rgb)
             
-            print(f"[HandDetector] Skin tone: {skin_tone}, Brightness: {brightness}")
+            print(f"[HandDetector] Skin tone: {skin_tone}, Brightness: {brightness}, RGB: {skin_rgb}")
             
             # Get color recommendations
             recommended_colors = self.skin_tone_categories[skin_tone]['colors']
@@ -75,6 +80,8 @@ class HandSkinToneDetector:
             
         except Exception as e:
             print(f"[HandDetector] Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': f'Detection failed: {str(e)}'
@@ -144,36 +151,153 @@ class HandSkinToneDetector:
         # Find contours
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
+        print(f"[HandDetector] Found {len(contours)} contours")
+        
         if not contours:
+            print(f"[HandDetector] No contours found")
             return None
         
         # Filter contours by area - more lenient threshold
-        valid_contours = [c for c in contours if cv2.contourArea(c) > 1000]  # Reduced from 2000
+        valid_contours = [c for c in contours if cv2.contourArea(c) > 500]  # Even more lenient
+        
+        print(f"[HandDetector] {len(valid_contours)} contours passed area filter")
         
         if not valid_contours:
+            print(f"[HandDetector] No contours passed area filter")
             return None
         
         # Get the largest contour (assumed to be the hand)
         largest_contour = max(valid_contours, key=cv2.contourArea)
+        contour_area = cv2.contourArea(largest_contour)
+        print(f"[HandDetector] Largest contour area: {contour_area}")
         
         # Additional validation: check if contour has reasonable aspect ratio
         x, y, w, h = cv2.boundingRect(largest_contour)
         aspect_ratio = float(w) / h if h > 0 else 0
         
+        print(f"[HandDetector] Bounding rect: {w}x{h}, aspect ratio: {aspect_ratio:.2f}")
+        
         # Hand should not be too elongated (more lenient for back of hand)
-        if aspect_ratio < 0.15 or aspect_ratio > 6.0:  # More lenient ranges
+        if aspect_ratio < 0.1 or aspect_ratio > 10.0:  # Very lenient ranges
+            print(f"[HandDetector] Aspect ratio {aspect_ratio:.2f} outside valid range")
             return None
         
         # Create final mask with only the largest contour
         hand_mask = np.zeros(mask.shape, dtype=np.uint8)
         cv2.drawContours(hand_mask, [largest_contour], -1, 255, -1)
         
-        # Final area check - ensure minimum 2% of image (reduced from 3%)
-        min_area = (image.shape[0] * image.shape[1]) * 0.02
+        # Final area check - ensure minimum 1% of image (very lenient)
+        min_area = (image.shape[0] * image.shape[1]) * 0.01
         if cv2.contourArea(largest_contour) < min_area:
+            print(f"[HandDetector] Contour area {contour_area} below minimum {min_area}")
             return None
         
+        print(f"[HandDetector] Hand detection successful!")
         return hand_mask
+    
+    def _detect_skin_fallback(self, image: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Fallback method: detect any skin-colored region
+        More lenient than hand detection
+        """
+        print(f"[HandDetector] Using fallback skin detection")
+        
+        # Try multiple color spaces and methods
+        height, width = image.shape[:2]
+        
+        # Method 1: Very broad HSV range
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        lower_skin = np.array([0, 5, 20], dtype=np.uint8)  # Very permissive
+        upper_skin = np.array([40, 255, 255], dtype=np.uint8)
+        mask_hsv = cv2.inRange(hsv, lower_skin, upper_skin)
+        
+        # Method 2: RGB-based detection
+        # Common skin color ranges in RGB
+        lower_rgb = np.array([80, 50, 20], dtype=np.uint8)
+        upper_rgb = np.array([255, 220, 180], dtype=np.uint8)
+        mask_rgb = cv2.inRange(image, lower_rgb, upper_rgb)
+        
+        # Combine masks
+        mask = cv2.bitwise_or(mask_hsv, mask_rgb)
+        
+        # If still nothing, use center region
+        if cv2.countNonZero(mask) < 100:
+            print(f"[HandDetector] Creating center region mask")
+            mask = np.zeros((height, width), dtype=np.uint8)
+            center_x, center_y = width // 2, height // 2
+            region_w, region_h = min(200, width // 3), min(200, height // 3)
+            
+            cv2.rectangle(mask, 
+                         (center_x - region_w//2, center_y - region_h//2),
+                         (center_x + region_w//2, center_y + region_h//2),
+                         255, -1)
+            
+            print(f"[HandDetector] Using center region as fallback")
+            return mask
+        
+        # Light morphological operations
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        
+        # Find contours
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            print(f"[HandDetector] Fallback: No skin regions found")
+            return None
+        
+        # Get any reasonable sized region
+        valid_contours = [c for c in contours if cv2.contourArea(c) > 100]  # Very small threshold
+        
+        if not valid_contours:
+            print(f"[HandDetector] Fallback: No regions passed area filter")
+            return None
+        
+        # Use the largest region
+        largest_contour = max(valid_contours, key=cv2.contourArea)
+        
+        # Create mask
+        hand_mask = np.zeros(mask.shape, dtype=np.uint8)
+        cv2.drawContours(hand_mask, [largest_contour], -1, 255, -1)
+        
+        print(f"[HandDetector] Fallback detection successful!")
+        return hand_mask
+    
+    def detect_from_rgb(self, rgb_values: list) -> dict:
+        """
+        Detect skin tone from RGB values directly (bypass camera detection)
+        
+        Args:
+            rgb_values: [R, G, B] values (0-255)
+            
+        Returns:
+            dict with skin_tone and recommended_colors
+        """
+        try:
+            rgb = np.array(rgb_values, dtype=int)
+            
+            # Classify skin tone
+            skin_tone, brightness = self._classify_skin_tone(rgb)
+            
+            # Get color recommendations
+            recommended_colors = self.skin_tone_categories[skin_tone]['colors']
+            
+            print(f"[HandDetector] Direct RGB classification: {rgb} -> {skin_tone}")
+            
+            return {
+                'success': True,
+                'skin_tone': skin_tone.title(),
+                'rgb_value': rgb.tolist(),
+                'brightness': int(brightness),
+                'recommended_colors': recommended_colors
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'RGB classification failed: {str(e)}'
+            }
     
     def _extract_skin_color(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Extract average skin color from masked region"""
