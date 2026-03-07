@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { userAPI } from '../services/api';
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -15,11 +16,16 @@ const Register = () => {
   const { register, user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if user is already authenticated
+  // If already logged in, skip to recommendations (profile already done) or profile
   useEffect(() => {
     if (user) {
-      console.log('User already authenticated, redirecting to profile');
-      navigate('/profile', { replace: true });
+      userAPI.getProfile()
+        .then(res => {
+          const p = res.data.profile;
+          const done = p && p.body_type && p.age && p.gender;
+          navigate(done ? '/recommendations' : '/profile', { replace: true });
+        })
+        .catch(() => navigate('/profile', { replace: true }));
     }
   }, [user, navigate]);
 

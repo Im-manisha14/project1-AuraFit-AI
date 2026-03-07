@@ -220,7 +220,7 @@ const Trends = () => {
                 transition={{ duration: 0.6, delay: index * 0.1 }}
                 whileHover={{ y: -12 }}
                 className="group cursor-pointer"
-                onClick={() => navigate(`/outfit/${outfit.id}`)}
+                onClick={() => navigate('/explore-trends')}
               >
                 <div className="relative overflow-hidden bg-white shadow-lg hover:shadow-2xl transition-all duration-500 border border-gray-200">
                   {/* Trending Badge */}

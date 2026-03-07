@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { userAPI } from '../services/api';
 import { motion } from 'framer-motion';
 import { FiMail, FiLock, FiArrowRight } from 'react-icons/fi';
 
@@ -13,11 +14,16 @@ const Login = () => {
   const { login, user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if user is already authenticated
+  // If already logged in, check profile and redirect appropriately
   useEffect(() => {
     if (user) {
-      console.log('User already authenticated, redirecting to dashboard');
-      navigate('/dashboard', { replace: true });
+      userAPI.getProfile()
+        .then(res => {
+          const p = res.data.profile;
+          const done = p && p.body_type && p.age && p.gender;
+          navigate(done ? '/recommendations' : '/profile', { replace: true });
+        })
+        .catch(() => navigate('/profile', { replace: true }));
     }
   }, [user, navigate]);
 
@@ -30,9 +36,15 @@ const Login = () => {
       const result = await login(email, password);
 
       if (result.success) {
-        // Small delay to ensure token is properly stored
-        await new Promise(resolve => setTimeout(resolve, 100));
-        navigate('/dashboard', { replace: true });
+        // Check profile completeness — skip profile page if already filled
+        try {
+          const res = await userAPI.getProfile();
+          const p = res.data.profile;
+          const done = p && p.body_type && p.age && p.gender;
+          navigate(done ? '/recommendations' : '/profile', { replace: true });
+        } catch {
+          navigate('/profile', { replace: true });
+        }
       } else {
         setError(result.error);
         setLoading(false);

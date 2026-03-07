@@ -1,0 +1,45 @@
+{
+  "skin_tone_palettes": {
+    "fair": {
+      "description": "Cool, light undertones — look best in cool and jewel tones",
+      "recommended": ["lavender", "pastel blue", "soft pink", "navy", "emerald green", "burgundy", "silver", "mint green", "powder blue", "deep plum"],
+      "avoid": ["orange", "warm brown", "mustard yellow", "earthy tones"]
+    },
+    "light": {
+      "description": "Warm, peachy undertones — warm and neutral tones suit best",
+      "recommended": ["peach", "warm beige", "mint green", "coral", "olive green", "dusty rose", "blush pink", "camel", "ivory", "warm red"],
+      "avoid": ["very dark black-on-black tones", "stark neons"]
+    },
+    "medium": {
+      "description": "Neutral to warm undertones — jewel and earthy tones are flattering",
+      "recommended": ["emerald", "teal", "mustard", "deep purple", "royal blue", "terracotta", "burnt orange", "forest green", "chocolate brown", "cobalt"],
+      "avoid": ["pastel washed-out shades that disappear against skin"]
+    },
+    "olive": {
+      "description": "Yellow-green undertones — earth tones and warm gold hues look stunning",
+      "recommended": ["earth brown", "maroon", "cream", "gold", "forest green", "camel", "burnt rust", "chocolate", "khaki", "warm burgundy"],
+      "avoid": ["cool grays", "pastel blues that clash with yellow undertones"]
+    },
+    "deep": {
+      "description": "Rich, dark undertones — bold, bright, and high-contrast colors shine",
+      "recommended": ["royal blue", "bright yellow", "crisp white", "vivid orange", "electric blue", "fuchsia", "gold", "cobalt", "hot pink", "lime green"],
+      "avoid": ["muddy browns", "dark navy that blends with skin tone"]
+    }
+  },
+  "seasonal_palettes": {
+    "spring": ["blush pink", "mint green", "sky blue", "peach", "lavender", "soft yellow", "coral", "seafoam"],
+    "summer": ["white", "aqua", "coral", "turquoise", "sunny yellow", "hot pink", "ocean blue", "lime"],
+    "fall": ["burnt orange", "deep burgundy", "mustard", "rust", "chocolate brown", "forest green", "camel", "maroon"],
+    "winter": ["deep navy", "charcoal", "ivory", "emerald green", "wine red", "cobalt blue", "silver", "black"]
+  },
+  "color_combinations": [
+    { "primary": "navy", "secondary": "white", "accent": "gold", "mood": "classic" },
+    { "primary": "black", "secondary": "white", "accent": "red", "mood": "bold" },
+    { "primary": "beige", "secondary": "cream", "accent": "camel", "mood": "minimalist" },
+    { "primary": "emerald", "secondary": "black", "accent": "gold", "mood": "luxe" },
+    { "primary": "lavender", "secondary": "white", "accent": "silver", "mood": "soft" },
+    { "primary": "terracotta", "secondary": "cream", "accent": "olive", "mood": "earthy" },
+    { "primary": "cobalt", "secondary": "white", "accent": "navy", "mood": "vibrant" },
+    { "primary": "mustard", "secondary": "rust", "accent": "brown", "mood": "autumn" }
+  ]
+}

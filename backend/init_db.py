@@ -5,7 +5,7 @@ Run this script to set up the database for the first time
 from app import app
 from extensions import db
 from models.user import User, UserProfile, StylePreference
-from models.outfit import Outfit, UserFeedback, Recommendation
+from models.outfit import Outfit, UserFeedback, Recommendation, OutfitInteraction
 
 def init_db():
     """Initialize database and create all tables"""

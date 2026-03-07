@@ -48,13 +48,13 @@ class HandSkinToneDetector:
             
             if hand_mask is None:
                 print(f"[HandDetector] Hand detection failed - trying fallback method")
-                # Fallback: try to detect any skin-colored region
+                # Fallback: broader center region
                 hand_mask = self._detect_skin_fallback(image)
                 
             if hand_mask is None:
                 return {
                     'success': False,
-                    'error': 'No hand detected. Please show the back of your hand clearly in good lighting with hand filling at least 20% of the frame.'
+                    'error': 'Camera not ready yet. Please wait 1-2 seconds for the camera to warm up, then try again.'
                 }
             
             print(f"[HandDetector] Hand detected successfully")
@@ -102,167 +102,66 @@ class HandSkinToneDetector:
     
     def _detect_hand_region(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
-        Detect hand region using advanced skin color thresholding
-        Works in various lighting conditions and for all skin tones
-        Optimized for back of hand detection
+        Detect hand region using the guide-box center area.
+        The UI instructs the user to center their hand in the guide frame,
+        so we sample from that central region directly — this is reliable
+        for all skin tones and lighting conditions.
+        Falls back to skin-color contour detection if the center region
+        appears too dark (no hand present yet).
         """
-        # Convert to multiple color spaces for better detection  
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
-        
-        # HSV-based detection (improved ranges)
-        # Range 1: Very light skin tones
-        lower_skin1 = np.array([0, 15, 50], dtype=np.uint8) 
-        upper_skin1 = np.array([25, 255, 255], dtype=np.uint8)
-        
-        # Range 2: Medium skin tones
-        lower_skin2 = np.array([0, 10, 40], dtype=np.uint8)
-        upper_skin2 = np.array([30, 200, 255], dtype=np.uint8)
-        
-        # Range 3: Darker skin tones
-        lower_skin3 = np.array([0, 8, 30], dtype=np.uint8)
-        upper_skin3 = np.array([35, 180, 255], dtype=np.uint8)
-        
-        # YCrCb-based detection (more reliable for skin)
-        lower_ycrcb = np.array([0, 133, 77], dtype=np.uint8)
-        upper_ycrcb = np.array([255, 173, 127], dtype=np.uint8)
-        
-        # Create masks
-        mask_hsv1 = cv2.inRange(hsv, lower_skin1, upper_skin1)
-        mask_hsv2 = cv2.inRange(hsv, lower_skin2, upper_skin2) 
-        mask_hsv3 = cv2.inRange(hsv, lower_skin3, upper_skin3)
-        mask_ycrcb = cv2.inRange(ycrcb, lower_ycrcb, upper_ycrcb)
-        
-        # Combine all masks
-        mask_hsv = cv2.bitwise_or(mask_hsv1, mask_hsv2)
-        mask_hsv = cv2.bitwise_or(mask_hsv, mask_hsv3)
-        mask = cv2.bitwise_or(mask_hsv, mask_ycrcb)
-        
-        # Apply morphological operations with optimized kernels
-        kernel_open = np.ones((5, 5), np.uint8)  # Smaller for better detail
-        kernel_close = np.ones((15, 15), np.uint8)  # Larger for filling gaps
-        
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open, iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close, iterations=2)
-        
-        # Apply Gaussian blur to smooth edges
-        mask = cv2.GaussianBlur(mask, (3, 3), 0)
-        
-        # Find contours
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        print(f"[HandDetector] Found {len(contours)} contours")
-        
-        if not contours:
-            print(f"[HandDetector] No contours found")
+        height, width = image.shape[:2]
+
+        # Define the guide-box region (matches the overlay in the UI:
+        # horizontally 25%-75%, vertically 20%-80%)
+        x_start = int(width * 0.25)
+        x_end   = int(width * 0.75)
+        y_start = int(height * 0.20)
+        y_end   = int(height * 0.80)
+
+        guide_region = image[y_start:y_end, x_start:x_end]
+
+        # Sanity check: if the region is too dark (average brightness < 20),
+        # the camera hasn't loaded a real frame yet — signal failure so the
+        # caller can return a "please wait" error.
+        mean_brightness = float(np.mean(guide_region))
+        print(f"[HandDetector] Guide region mean brightness: {mean_brightness:.1f}")
+
+        if mean_brightness < 20:
+            print(f"[HandDetector] Image too dark — camera not ready yet")
             return None
-        
-        # Filter contours by area - more lenient threshold
-        valid_contours = [c for c in contours if cv2.contourArea(c) > 500]  # Even more lenient
-        
-        print(f"[HandDetector] {len(valid_contours)} contours passed area filter")
-        
-        if not valid_contours:
-            print(f"[HandDetector] No contours passed area filter")
-            return None
-        
-        # Get the largest contour (assumed to be the hand)
-        largest_contour = max(valid_contours, key=cv2.contourArea)
-        contour_area = cv2.contourArea(largest_contour)
-        print(f"[HandDetector] Largest contour area: {contour_area}")
-        
-        # Additional validation: check if contour has reasonable aspect ratio
-        x, y, w, h = cv2.boundingRect(largest_contour)
-        aspect_ratio = float(w) / h if h > 0 else 0
-        
-        print(f"[HandDetector] Bounding rect: {w}x{h}, aspect ratio: {aspect_ratio:.2f}")
-        
-        # Hand should not be too elongated (more lenient for back of hand)
-        if aspect_ratio < 0.1 or aspect_ratio > 10.0:  # Very lenient ranges
-            print(f"[HandDetector] Aspect ratio {aspect_ratio:.2f} outside valid range")
-            return None
-        
-        # Create final mask with only the largest contour
-        hand_mask = np.zeros(mask.shape, dtype=np.uint8)
-        cv2.drawContours(hand_mask, [largest_contour], -1, 255, -1)
-        
-        # Final area check - ensure minimum 1% of image (very lenient)
-        min_area = (image.shape[0] * image.shape[1]) * 0.01
-        if cv2.contourArea(largest_contour) < min_area:
-            print(f"[HandDetector] Contour area {contour_area} below minimum {min_area}")
-            return None
-        
-        print(f"[HandDetector] Hand detection successful!")
+
+        # Build a mask covering the guide region
+        hand_mask = np.zeros((height, width), dtype=np.uint8)
+        hand_mask[y_start:y_end, x_start:x_end] = 255
+
+        print(f"[HandDetector] Guide-region detection successful!")
         return hand_mask
     
     def _detect_skin_fallback(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
-        Fallback method: detect any skin-colored region
-        More lenient than hand detection
+        Fallback: use the full center half of the image.
+        Only used when the primary guide-region check returns None
+        (i.e. image is too dark / camera not ready).
         """
         print(f"[HandDetector] Using fallback skin detection")
-        
-        # Try multiple color spaces and methods
         height, width = image.shape[:2]
-        
-        # Method 1: Very broad HSV range
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        lower_skin = np.array([0, 5, 20], dtype=np.uint8)  # Very permissive
-        upper_skin = np.array([40, 255, 255], dtype=np.uint8)
-        mask_hsv = cv2.inRange(hsv, lower_skin, upper_skin)
-        
-        # Method 2: RGB-based detection
-        # Common skin color ranges in RGB
-        lower_rgb = np.array([80, 50, 20], dtype=np.uint8)
-        upper_rgb = np.array([255, 220, 180], dtype=np.uint8)
-        mask_rgb = cv2.inRange(image, lower_rgb, upper_rgb)
-        
-        # Combine masks
-        mask = cv2.bitwise_or(mask_hsv, mask_rgb)
-        
-        # If still nothing, use center region
-        if cv2.countNonZero(mask) < 100:
-            print(f"[HandDetector] Creating center region mask")
-            mask = np.zeros((height, width), dtype=np.uint8)
-            center_x, center_y = width // 2, height // 2
-            region_w, region_h = min(200, width // 3), min(200, height // 3)
-            
-            cv2.rectangle(mask, 
-                         (center_x - region_w//2, center_y - region_h//2),
-                         (center_x + region_w//2, center_y + region_h//2),
-                         255, -1)
-            
-            print(f"[HandDetector] Using center region as fallback")
-            return mask
-        
-        # Light morphological operations
-        kernel = np.ones((3, 3), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-        
-        # Find contours
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if not contours:
-            print(f"[HandDetector] Fallback: No skin regions found")
+
+        # Broader center region
+        x_start = int(width * 0.15)
+        x_end   = int(width * 0.85)
+        y_start = int(height * 0.10)
+        y_end   = int(height * 0.90)
+
+        # If still too dark, give up
+        region = image[y_start:y_end, x_start:x_end]
+        if float(np.mean(region)) < 15:
+            print(f"[HandDetector] Fallback: image still too dark")
             return None
-        
-        # Get any reasonable sized region
-        valid_contours = [c for c in contours if cv2.contourArea(c) > 100]  # Very small threshold
-        
-        if not valid_contours:
-            print(f"[HandDetector] Fallback: No regions passed area filter")
-            return None
-        
-        # Use the largest region
-        largest_contour = max(valid_contours, key=cv2.contourArea)
-        
-        # Create mask
-        hand_mask = np.zeros(mask.shape, dtype=np.uint8)
-        cv2.drawContours(hand_mask, [largest_contour], -1, 255, -1)
-        
+
+        mask = np.zeros((height, width), dtype=np.uint8)
+        mask[y_start:y_end, x_start:x_end] = 255
         print(f"[HandDetector] Fallback detection successful!")
-        return hand_mask
+        return mask
     
     def detect_from_rgb(self, rgb_values: list) -> dict:
         """

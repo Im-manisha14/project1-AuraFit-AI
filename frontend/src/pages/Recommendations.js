@@ -1,25 +1,84 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { recommendationAPI, userAPI } from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiHeart, FiUser, FiArrowRight } from 'react-icons/fi';
+import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiHeart, FiUser, FiArrowRight, FiShoppingBag } from 'react-icons/fi';
 import { HiOutlineSparkles } from 'react-icons/hi';
+
+const COLLECTION_META = {
+  trending:   { title: 'Trending Right Now',   icon: '🔥' },
+  seasonal:   { title: 'Seasonal Picks',       icon: '🌤' },
+  casual:     { title: 'Casual Collection',    icon: '👕' },
+  formal:     { title: 'Formal & Work Wear',   icon: '💼' },
+  sports:     { title: 'Sports & Athleisure',  icon: '🏋' },
+  minimalist: { title: 'Minimalist Fashion',   icon: '🎯' },
+  party:      { title: 'Party & Date Night',   icon: '🎉' },
+};
+
+const SHOP_LABELS = {
+  myntra:        { label: 'Myntra',    color: '#FF3F6C' },
+  flipkart:      { label: 'Flipkart', color: '#2874F0' },
+  ajio:          { label: 'Ajio',     color: '#E31E25' },
+  meesho:        { label: 'Meesho',   color: '#9B2D8E' },
+  nykaa_fashion: { label: 'Nykaa',    color: '#FC2779' },
+  amazon:        { label: 'Amazon',   color: '#FF9900' },
+  hm:            { label: 'H&M',      color: '#E50010' },
+  zara:          { label: 'Zara',     color: '#111111' },
+};
+
+const GENDER_BADGE = {
+  female: { label: 'Women', bg: '#FFF0F6', color: '#C2185B' },
+  male:   { label: 'Men',   bg: '#E3F2FD', color: '#1565C0' },
+  unisex: { label: 'Unisex', bg: '#F3E5F5', color: '#6A1B9A' },
+};
+
+const GenderBadge = ({ gender }) => {
+  const g = (gender || 'unisex').toLowerCase();
+  const badge = GENDER_BADGE[g] || GENDER_BADGE.unisex;
+  return (
+    <span
+      className="text-xs font-bold px-2 py-0.5 rounded-full tracking-wide uppercase"
+      style={{ background: badge.bg, color: badge.color }}
+    >
+      {badge.label}
+    </span>
+  );
+};
 
 const Recommendations = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const autoGenerateRef = useRef(location.state?.autoGenerate || false);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileComplete, setProfileComplete] = useState(true);
+  const [userGender, setUserGender] = useState('');
   const [filters, setFilters] = useState({
     occasion: 'casual',
     season: 'all',
     limit: 10,
   });
+  const [collections, setCollections] = useState({});
+  const [collectionsLoading, setCollectionsLoading] = useState(false);
+  const [shopOpen, setShopOpen] = useState(null);
 
   useEffect(() => {
     checkProfileStatus();
+    loadCollections();
   }, []);
+
+  const loadCollections = async () => {
+    setCollectionsLoading(true);
+    try {
+      const res = await recommendationAPI.getCollections({ season: 'all', limit: 8 });
+      setCollections(res.data.collections || {});
+    } catch (err) {
+      console.error('Error loading collections:', err);
+    } finally {
+      setCollectionsLoading(false);
+    }
+  };
 
   const checkProfileStatus = async () => {
     try {
@@ -30,10 +89,28 @@ const Recommendations = () => {
       const prefs = prefsRes.data.preferences;
       
       // Check if essential profile fields are filled
-      const isComplete = profile?.body_type && profile?.age && profile?.gender && 
-                        prefs?.preferred_styles?.length > 0;
+      // (preferred_styles is optional - don't gate on it)
+      const isComplete = !!(profile?.body_type && profile?.age && profile?.gender);
       
       setProfileComplete(isComplete);
+      if (profile?.gender) setUserGender(profile.gender.toLowerCase());
+
+      // Auto-generate if we just arrived from profile save
+      if (autoGenerateRef.current && isComplete) {
+        autoGenerateRef.current = false;
+        setLoading(true);
+        try {
+          const response = await recommendationAPI.generate({ occasion: 'casual', season: 'all', limit: 10 });
+          setRecommendations(response.data.recommendations || []);
+        } catch (err) {
+          console.error('Auto-generate error:', err);
+        } finally {
+          setLoading(false);
+        }
+      } else if (autoGenerateRef.current && !isComplete) {
+        autoGenerateRef.current = false;
+        setShowProfileModal(true);
+      }
     } catch (error) {
       // Don't fail - just assume profile needs completion
       console.error('Error checking profile:', error);
@@ -266,12 +343,34 @@ const Recommendations = () => {
 
                   {/* Content Section */}
                   <div className="p-6">
-                    <h3 className="text-xl font-bold text-gray-900 mb-2 tracking-tight">
-                      {rec.outfit?.name}
-                    </h3>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="text-xl font-bold text-gray-900 tracking-tight leading-snug">
+                        {rec.outfit?.name}
+                      </h3>
+                      <GenderBadge gender={rec.outfit?.gender} />
+                    </div>
                     <p className="text-gray-600 text-sm mb-4 font-light leading-relaxed">
                       {rec.outfit?.description}
                     </p>
+
+                    {/* Occasion + Season tags */}
+                    <div className="flex flex-wrap gap-1 mb-4">
+                      {rec.outfit?.occasion && (
+                        <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full capitalize font-medium">
+                          {rec.outfit.occasion}
+                        </span>
+                      )}
+                      {rec.outfit?.season && rec.outfit.season !== 'all' && (
+                        <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-full capitalize font-medium">
+                          {rec.outfit.season}
+                        </span>
+                      )}
+                      {rec.outfit?.style_type && (
+                        <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full capitalize font-medium">
+                          {rec.outfit.style_type}
+                        </span>
+                      )}
+                    </div>
 
                     {/* Score Breakdown */}
                     <div className="space-y-2 mb-4 pb-4 border-b border-gray-100">
@@ -293,6 +392,39 @@ const Recommendations = () => {
                       </div>
                     </div>
 
+                    {/* Dress Structure */}
+                    {(rec.outfit?.top || rec.outfit?.bottom || rec.outfit?.shoes || rec.outfit?.accessories?.length > 0) && (
+                      <div className="mb-4 pb-4 border-b border-gray-100">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">Outfit Pieces</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                          {rec.outfit?.top && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Top</span>
+                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.top}</span>
+                            </div>
+                          )}
+                          {rec.outfit?.bottom && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Bottom</span>
+                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.bottom}</span>
+                            </div>
+                          )}
+                          {rec.outfit?.shoes && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Shoes</span>
+                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.shoes}</span>
+                            </div>
+                          )}
+                          {rec.outfit?.accessories?.length > 0 && (
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Acc</span>
+                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.accessories.join(', ')}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Colors */}
                     {rec.outfit?.colors && rec.outfit.colors.length > 0 && (
                       <div className="flex gap-2 mb-4">
@@ -309,11 +441,52 @@ const Recommendations = () => {
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => navigate(`/outfit/${rec.outfit?.id}`)}
-                      className="w-full bg-gray-900 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-800 transition-colors flex items-center justify-center space-x-2"
+                      className="w-full bg-gray-900 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-800 transition-colors flex items-center justify-center space-x-2 mb-2"
                     >
                       <span>View Details</span>
                       <FiStar />
                     </motion.button>
+
+                    {/* Shop Links */}
+                    {rec.outfit?.shopping_links && Object.keys(rec.outfit.shopping_links).length > 0 && (
+                      <div>
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => setShopOpen(shopOpen === `rec-${index}` ? null : `rec-${index}`)}
+                          className="w-full border border-amber-600 text-amber-700 py-2.5 font-medium text-xs tracking-widest uppercase hover:bg-amber-50 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <FiShoppingBag />
+                          <span>{shopOpen === `rec-${index}` ? 'Hide Links' : 'Shop Now'}</span>
+                        </motion.button>
+                        {shopOpen === `rec-${index}` && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="grid grid-cols-4 gap-1 mt-2"
+                          >
+                            {Object.entries(rec.outfit.shopping_links).map(([platform, url]) => {
+                              const s = SHOP_LABELS[platform];
+                              if (!s) return null;
+                              return (
+                                <a
+                                  key={platform}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
+                                  style={{ borderColor: s.color, color: s.color }}
+                                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
+                                >
+                                  {s.label}
+                                </a>
+                              );
+                            })}
+                          </motion.div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -334,6 +507,171 @@ const Recommendations = () => {
             <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
               Set your preferences above and click generate to get personalized outfit recommendations!
             </p>
+          </motion.div>
+        )}
+
+        {/* Collections Section */}
+        {(collectionsLoading || Object.keys(collections).length > 0) && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="mt-16"
+          >
+            <div className="flex items-center mb-10">
+              <div>
+                <h2 className="text-3xl font-bold text-gray-900 tracking-tight whitespace-nowrap">Style Collections</h2>
+                {userGender && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    Curated <span className="font-semibold text-amber-600">
+                      {userGender === 'female' ? "women's" : userGender === 'male' ? "men's" : ''}
+                    </span> fashion for you
+                  </p>
+                )}
+              </div>
+              <div className="h-1 flex-1 ml-8 bg-gradient-to-r from-amber-600 to-transparent"></div>
+            </div>
+
+            {collectionsLoading ? (
+              <div className="text-center py-12 text-gray-400">
+                <HiOutlineSparkles className="text-5xl mx-auto mb-3 animate-pulse" />
+                <p className="font-light">Loading style collections…</p>
+              </div>
+            ) : (
+              Object.entries(COLLECTION_META).map(([key, meta]) => {
+                const outfits = collections[key];
+                if (!outfits || outfits.length === 0) return null;
+                return (
+                  <div key={key} className="mb-14">
+                    {/* Row Header */}
+                    <div className="flex items-center gap-3 mb-5">
+                      <span className="text-2xl">{meta.icon}</span>
+                      <h3 className="text-xl font-bold text-gray-900 tracking-tight">{meta.title}</h3>
+                      <span className="text-sm text-gray-400 font-light">{outfits.length} looks</span>
+                    </div>
+
+                    {/* Horizontal Scroll Row */}
+                    <div
+                      className="flex gap-5 pb-4"
+                      style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                    >
+                      {outfits.map((outfit, idx) => (
+                        <motion.div
+                          key={outfit.id}
+                          initial={{ opacity: 0, x: 20 }}
+                          whileInView={{ opacity: 1, x: 0 }}
+                          viewport={{ once: true }}
+                          transition={{ delay: idx * 0.04 }}
+                          className="flex-shrink-0 w-60 bg-white border border-gray-200 overflow-visible shadow-sm hover:shadow-md transition-all group"
+                        >
+                          {/* Outfit Image */}
+                          <div className="relative h-48 bg-gray-100 overflow-hidden">
+                            {outfit.image_url ? (
+                              <img
+                                src={outfit.image_url}
+                                alt={outfit.name}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <HiOutlineSparkles className="text-5xl text-gray-300" />
+                              </div>
+                            )}
+                            {outfit.match_score != null && (
+                              <div className="absolute top-2 right-2 bg-amber-600 text-white px-2 py-0.5 text-xs font-bold">
+                                {(outfit.match_score * 100).toFixed(0)}%
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Card Body */}
+                          <div className="p-4">
+                            <div className="flex items-start justify-between gap-1 mb-1">
+                              <p className="font-semibold text-gray-900 text-sm truncate flex-1" title={outfit.name}>{outfit.name}</p>
+                              <GenderBadge gender={outfit.gender} />
+                            </div>
+                            <p className="text-xs text-gray-500 mb-2 capitalize tracking-wide">{outfit.style_type}</p>
+
+                            {/* Dress Structure */}
+                            {(outfit.top || outfit.bottom || outfit.shoes || outfit.accessories?.length > 0) && (
+                              <div className="mb-3 pb-2 border-b border-gray-100">
+                                <div className="space-y-0.5">
+                                  {outfit.top && (
+                                    <div className="flex gap-1 text-xs">
+                                      <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Top</span>
+                                      <span className="text-gray-600 leading-snug">{outfit.top}</span>
+                                    </div>
+                                  )}
+                                  {outfit.bottom && (
+                                    <div className="flex gap-1 text-xs">
+                                      <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Bottom</span>
+                                      <span className="text-gray-600 leading-snug">{outfit.bottom}</span>
+                                    </div>
+                                  )}
+                                  {outfit.shoes && (
+                                    <div className="flex gap-1 text-xs">
+                                      <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Shoes</span>
+                                      <span className="text-gray-600 leading-snug">{outfit.shoes}</span>
+                                    </div>
+                                  )}
+                                  {outfit.accessories?.length > 0 && (
+                                    <div className="flex gap-1 text-xs">
+                                      <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Acc</span>
+                                      <span className="text-gray-600 leading-snug">{outfit.accessories.join(', ')}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Shop Button + Inline Links */}
+                            {outfit.shopping_links && Object.keys(outfit.shopping_links).length > 0 && (
+                              <div>
+                                <button
+                                  onClick={() => setShopOpen(
+                                    shopOpen === `${key}-${outfit.id}` ? null : `${key}-${outfit.id}`
+                                  )}
+                                  className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
+                                >
+                                  <FiShoppingBag className="text-xs" />
+                                  <span>{shopOpen === `${key}-${outfit.id}` ? 'Hide' : 'Shop Now'}</span>
+                                </button>
+                                {shopOpen === `${key}-${outfit.id}` && (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: -4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="grid grid-cols-4 gap-1 mt-2"
+                                  >
+                                    {Object.entries(outfit.shopping_links).map(([platform, url]) => {
+                                      const s = SHOP_LABELS[platform];
+                                      if (!s) return null;
+                                      return (
+                                        <a
+                                          key={platform}
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
+                                          style={{ borderColor: s.color, color: s.color }}
+                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
+                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
+                                        >
+                                          {s.label}
+                                        </a>
+                                      );
+                                    })}
+                                  </motion.div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </motion.div>
         )}
       </div>

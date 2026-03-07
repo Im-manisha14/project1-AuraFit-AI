@@ -44,11 +44,43 @@ const Profile = () => {
     }
   };
 
+  const COLOR_MAP = {
+    'lavender': '#E6E6FA', 'pastel blue': '#AEC6CF', 'soft pink': '#FFB6C1',
+    'peach': '#FFDAB9', 'beige': '#F5F5DC', 'mint green': '#98FF98',
+    'emerald': '#50C878', 'teal': '#008080', 'mustard': '#FFDB58',
+    'earth tones': '#8B6914', 'maroon': '#800000', 'cream': '#FFFDD0',
+    'royal blue': '#4169E1', 'yellow': '#FFD700', 'white': '#F5F5F5',
+    'navy': '#1B2A6B', 'forest green': '#228B22',
+  };
+
+  const getBodyTypeOptions = (gender) => {
+    if (gender === 'male') return [
+      { value: 'athletic', label: 'Athletic' },
+      { value: 'slim', label: 'Slim' },
+      { value: 'average', label: 'Average' },
+      { value: 'muscular', label: 'Muscular' },
+      { value: 'heavy', label: 'Heavy' },
+    ];
+    if (gender === 'female') return [
+      { value: 'hourglass', label: 'Hourglass' },
+      { value: 'pear', label: 'Pear' },
+      { value: 'apple', label: 'Apple' },
+      { value: 'rectangle', label: 'Rectangle' },
+      { value: 'inverted_triangle', label: 'Inverted Triangle' },
+    ];
+    return [];
+  };
+
   const handleProfileChange = (e) => {
-    setProfile({
-      ...profile,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    const updated = { ...profile, [name]: value };
+    if (name === 'gender') {
+      const validOptions = getBodyTypeOptions(value).map(o => o.value);
+      if (validOptions.length > 0 && !validOptions.includes(updated.body_type)) {
+        updated.body_type = '';
+      }
+    }
+    setProfile(updated);
   };
 
   const handleSave = async () => {
@@ -60,7 +92,7 @@ const Profile = () => {
       setMessage('Profile updated successfully! ✅');
       // Redirect to recommendations page after 1 second
       setTimeout(() => {
-        navigate('/recommendations');
+        navigate('/recommendations', { state: { autoGenerate: true } });
       }, 1000);
     } catch (error) {
       setMessage('Error updating profile. Please try again. ❌');
@@ -289,24 +321,6 @@ const Profile = () => {
             />
           </div>
           <div>
-            <label className="block text-gray-700 font-semibold mb-2 text-sm sm:text-base">
-              Body Type
-            </label>
-            <select
-              name="body_type"
-              value={profile.body_type || ''}
-              onChange={handleProfileChange}
-              className="input-field w-full text-sm sm:text-base"
-            >
-              <option value="">Select Body Type</option>
-              <option value="hourglass">Hourglass</option>
-              <option value="pear">Pear</option>
-              <option value="apple">Apple</option>
-              <option value="rectangle">Rectangle</option>
-              <option value="inverted_triangle">Inverted Triangle</option>
-            </select>
-          </div>
-          <div>
             <label className="block text-gray-700 font-semibold mb-2 text-sm sm:text-base">Age</label>
             <input
               type="number"
@@ -333,6 +347,28 @@ const Profile = () => {
               <option value="non-binary">Non-binary</option>
               <option value="prefer-not-to-say">Prefer not to say</option>
             </select>
+          </div>
+          <div>
+            <label className="block text-gray-700 font-semibold mb-2 text-sm sm:text-base">
+              Body Type
+            </label>
+            <select
+              name="body_type"
+              value={profile.body_type || ''}
+              onChange={handleProfileChange}
+              className="input-field w-full text-sm sm:text-base"
+              disabled={!profile.gender || getBodyTypeOptions(profile.gender).length === 0}
+            >
+              <option value="">
+                {!profile.gender ? 'Select gender first' : 'Select Body Type'}
+              </option>
+              {getBodyTypeOptions(profile.gender).map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {!profile.gender && (
+              <p className="text-xs text-amber-600 mt-1">⚠ Select your gender first to see body type options</p>
+            )}
           </div>
           <div className="col-span-1 sm:col-span-2">
             <label className="block text-gray-700 font-semibold mb-2 text-sm sm:text-base">
@@ -438,9 +474,17 @@ const Profile = () => {
                   ✅ Detection Successful!
                 </h4>
                 <div className="space-y-2 text-xs sm:text-sm">
-                  <p>
-                    <strong>Skin Tone:</strong> {detectionResult.skin_tone}
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <strong>Skin Tone:</strong>
+                    {detectionResult.rgb_value && (
+                      <div
+                        className="w-8 h-8 rounded border-2 border-gray-300 shadow-sm flex-shrink-0"
+                        style={{ backgroundColor: `rgb(${detectionResult.rgb_value.join(',')})` }}
+                        title={`rgb(${detectionResult.rgb_value.join(', ')})`}
+                      />
+                    )}
+                    <span>{detectionResult.skin_tone}</span>
+                  </div>
                   <p>
                     <strong>Brightness:</strong> {detectionResult.brightness}
                   </p>
@@ -450,8 +494,12 @@ const Profile = () => {
                       {detectionResult.recommended_colors?.map((color, idx) => (
                         <span
                           key={idx}
-                          className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs"
+                          className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs flex items-center gap-1"
                         >
+                          <div
+                            className="w-3 h-3 rounded-full border border-purple-300 flex-shrink-0"
+                            style={{ backgroundColor: COLOR_MAP[color.toLowerCase()] || color }}
+                          />
                           {color}
                         </span>
                       ))}
@@ -553,9 +601,17 @@ const Profile = () => {
                     ✅ Analysis Complete!
                   </h4>
                   <div className="space-y-2 text-xs sm:text-sm">
-                    <p>
-                      <strong>Skin Tone:</strong> {detectionResult.skin_tone}
-                    </p>
+                    <div className="flex items-center gap-3">
+                      <strong>Skin Tone:</strong>
+                      {detectionResult.rgb_value && (
+                        <div
+                          className="w-8 h-8 rounded border-2 border-gray-300 shadow-sm flex-shrink-0"
+                          style={{ backgroundColor: `rgb(${detectionResult.rgb_value.join(',')})` }}
+                          title={`rgb(${detectionResult.rgb_value.join(', ')})`}
+                        />
+                      )}
+                      <span>{detectionResult.skin_tone}</span>
+                    </div>
                     <p>
                       <strong>RGB Values:</strong> {detectionResult.rgb_value?.join(', ')}
                     </p>
@@ -565,8 +621,12 @@ const Profile = () => {
                         {detectionResult.recommended_colors?.map((color, idx) => (
                           <span
                             key={idx}
-                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs"
+                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs flex items-center gap-1"
                           >
+                            <div
+                              className="w-3 h-3 rounded-full border border-blue-300 flex-shrink-0"
+                              style={{ backgroundColor: COLOR_MAP[color.toLowerCase()] || color }}
+                            />
                             {color}
                           </span>
                         ))}

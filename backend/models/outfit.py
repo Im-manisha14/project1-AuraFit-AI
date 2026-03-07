@@ -15,6 +15,7 @@ class Outfit(db.Model):
     accessories = db.Column(db.JSON)
     
     # Attributes
+    gender = db.Column(db.String(20), default='unisex')  # male, female, unisex
     occasion = db.Column(db.String(50))
     season = db.Column(db.String(20))
     style_type = db.Column(db.String(50))
@@ -43,6 +44,7 @@ class Outfit(db.Model):
             'bottom': self.bottom,
             'shoes': self.shoes,
             'accessories': self.accessories,
+            'gender': self.gender,
             'occasion': self.occasion,
             'season': self.season,
             'style_type': self.style_type,
@@ -125,4 +127,31 @@ class Recommendation(db.Model):
             'occasion': self.occasion,
             'season': self.season,
             'outfit': self.outfit.to_dict() if self.outfit else None
+        }
+
+
+class OutfitInteraction(db.Model):
+    """
+    Tracks every time a user views, clicks, or saves an outfit.
+    Used by the collaborative filtering layer of the recommendation engine.
+    """
+    __tablename__ = 'outfit_interactions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    outfit_id = db.Column(db.Integer, db.ForeignKey('outfits.id'), nullable=False)
+    # interaction_type: 'view' | 'click' | 'save'
+    interaction_type = db.Column(db.String(20), nullable=False, default='view')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='interactions')
+    outfit = db.relationship('Outfit', backref='interactions')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'outfit_id': self.outfit_id,
+            'interaction_type': self.interaction_type,
+            'created_at': self.created_at.isoformat(),
         }

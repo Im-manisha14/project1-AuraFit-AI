@@ -150,3 +150,22 @@ def update_preferences():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/body-types', methods=['GET'])
+@jwt_required()
+def get_body_types():
+    """Return valid body type options for a given gender."""
+    gender = request.args.get('gender', '').lower().strip()
+
+    MALE_TYPES = ['athletic', 'slim', 'average', 'muscular', 'heavy']
+    FEMALE_TYPES = ['hourglass', 'pear', 'apple', 'rectangle', 'inverted_triangle']
+
+    if gender == 'male':
+        body_types = MALE_TYPES
+    elif gender == 'female':
+        body_types = FEMALE_TYPES
+    else:
+        body_types = MALE_TYPES + FEMALE_TYPES
+
+    return jsonify({'gender': gender or 'all', 'body_types': body_types}), 200

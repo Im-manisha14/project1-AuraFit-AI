@@ -1,0 +1,86 @@
+{
+  "year": 2026,
+  "season": "Spring/Summer",
+  "trending_colors": [
+    { "hex": "#0A0A0A", "name": "Deep Black", "description": "Ultra-deep black for power dressing" },
+    { "hex": "#2C4A52", "name": "Dark Teal", "description": "Moody teal inspired by ocean depths" },
+    { "hex": "#E8D5C4", "name": "Cream Beige", "description": "Warm neutral that anchors any look" },
+    { "hex": "#C9A882", "name": "Sandy Tan", "description": "Earthy warmth of desert sand dunes" },
+    { "hex": "#5C5048", "name": "Earth Brown", "description": "Deep root-like brown for grounding" },
+    { "hex": "#B5C4B1", "name": "Sage Green", "description": "Calming botanical green tones" },
+    { "hex": "#D4A574", "name": "Warm Terracotta", "description": "Sun-baked Mediterranean clay hues" },
+    { "hex": "#8B7355", "name": "Camel", "description": "Timeless camel for elevated minimalism" }
+  ],
+  "trending_styles": [
+    {
+      "name": "Oversized & Relaxed Fits",
+      "description": "Comfort meets chic — oversized silhouettes dominate casual and street fashion.",
+      "key_pieces": ["wide-leg trousers", "boxy blazers", "oversized hoodies", "maxi skirts"],
+      "occasions": ["casual", "work"],
+      "rank": 1
+    },
+    {
+      "name": "Minimalist Aesthetic",
+      "description": "Clean lines, neutral palettes, and intentional simplicity define modern luxury.",
+      "key_pieces": ["turtlenecks", "straight-leg trousers", "monochrome sets", "clean-cut coats"],
+      "occasions": ["work", "casual", "date"],
+      "rank": 2
+    },
+    {
+      "name": "Sustainable Fashion",
+      "description": "Eco-conscious materials and ethical production — style with purpose.",
+      "key_pieces": ["linen sets", "organic cotton basics", "upcycled denim", "hemp fabric pieces"],
+      "occasions": ["casual", "work"],
+      "rank": 3
+    },
+    {
+      "name": "Vintage Revival",
+      "description": "70s flares, 90s grunge, and 80s power dressing are all back in style.",
+      "key_pieces": ["flared jeans", "platform boots", "vintage band tees", "high-waist everything"],
+      "occasions": ["casual", "party"],
+      "rank": 4
+    },
+    {
+      "name": "Athleisure Fusion",
+      "description": "Sports-inspired fashion blurs the line between gym and everyday wear.",
+      "key_pieces": ["bike shorts", "sporty blazers", "track pants", "coordinated sets"],
+      "occasions": ["casual", "gym"],
+      "rank": 5
+    },
+    {
+      "name": "Bold Monochromatic",
+      "description": "Head-to-toe single color dressing — maximalist impact with minimal effort.",
+      "key_pieces": ["matching sets", "monochrome suits", "tone-on-tone layering"],
+      "occasions": ["party", "work", "date"],
+      "rank": 6
+    },
+    {
+      "name": "Quiet Luxury",
+      "description": "Understated, high-quality pieces that signal wealth without logos.",
+      "key_pieces": ["cashmere knits", "tailored trousers", "silk blouses", "leather loafers"],
+      "occasions": ["work", "formal", "date"],
+      "rank": 7
+    },
+    {
+      "name": "Dopamine Dressing",
+      "description": "Bright, joyful colors worn to express positivity and playfulness.",
+      "key_pieces": ["color-block outfits", "bright prints", "neon accessories", "fun co-ords"],
+      "occasions": ["casual", "party"],
+      "rank": 8
+    }
+  ],
+  "trending_fabrics": [
+    { "name": "Organic Linen", "properties": ["breathable", "sustainable", "textured"], "best_for": ["summer", "spring"] },
+    { "name": "Recycled Polyester", "properties": ["durable", "eco-friendly", "moisture-wicking"], "best_for": ["gym", "casual"] },
+    { "name": "Cashmere Blend", "properties": ["soft", "warm", "luxurious"], "best_for": ["winter", "fall"] },
+    { "name": "Tencel/Lyocell", "properties": ["silky", "sustainable", "breathable"], "best_for": ["spring", "summer"] },
+    { "name": "Structured Wool", "properties": ["warm", "structured", "elegant"], "best_for": ["winter", "fall"] }
+  ],
+  "style_tips_by_skin_tone": {
+    "fair": "Lean into cool and deep tones like navy, emerald, and burgundy to create beautiful contrast. Pastels and soft pinks work for a romantic, ethereal look.",
+    "light": "Warm peaches, corals, and earthy neutrals enhance your natural glow. Avoid very pale pastels that might wash you out.",
+    "medium": "You can wear almost anything! Jewel tones like sapphire, emerald, and amethyst look especially radiant against your skin tone.",
+    "olive": "Rich earth tones — burnt sienna, camel, gold, and forest green — bring out the warmth in your complexion beautifully.",
+    "deep": "Bold and bright colors like cobalt, fuchsia, and vivid yellow create stunning contrast. White and gold are particularly striking choices."
+  }
+}

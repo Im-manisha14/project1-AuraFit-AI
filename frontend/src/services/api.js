@@ -109,6 +109,7 @@ export const recommendationAPI = {
   generate: (data) => api.post('/recommendations/generate', data),
   getHistory: (params) => api.get('/recommendations/history', { params }),
   getRecommendation: (id) => api.get(`/recommendations/${id}`),
+  getCollections: (params) => api.get('/recommendations/collections', { params }),
 };
 
 export default api;

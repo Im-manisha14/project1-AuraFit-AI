@@ -10,6 +10,7 @@ import Profile from './pages/Profile';
 import Recommendations from './pages/Recommendations';
 import OutfitDetail from './pages/OutfitDetail';
 import Trends from './pages/Trends';
+import ExploreTrends from './pages/ExploreTrends';
 
 // Components
 import PrivateRoute from './components/PrivateRoute';
@@ -76,9 +77,13 @@ function App() {
             />
             <Route
               path="/trends"
+              element={<Trends />}
+            />
+            <Route
+              path="/explore-trends"
               element={
                 <PrivateRoute>
-                  <Trends />
+                  <ExploreTrends />
                 </PrivateRoute>
               }
             />
