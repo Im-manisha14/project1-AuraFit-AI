@@ -93,20 +93,27 @@ class RecommendationEngine:
         """Generate personalized outfit recommendations using hybrid filtering."""
         from models.outfit import Outfit, Recommendation
 
-        # Step 1 â€“ Load the full outfit catalogue
-        outfits = Outfit.query.all()
+        # Step 1 -- Query with DB-level gender + occasion filters.
+        query = Outfit.query
 
-        # Step 2 – Gender filtering (STRICT – never fall back to wrong gender)
-        #   Male   → male  + unisex outfits only
-        #   Female → female + unisex outfits only
+        # Gender filter (STRICT -- male or female, never cross-gender)
         if profile and profile.gender:
             gender = profile.gender.lower()
             if gender in ('male', 'female'):
-                outfits = [
-                    o for o in outfits
-                    if (o.gender or 'unisex').lower() in (gender, 'unisex')
-                ]
+                from sqlalchemy import or_
+                query = query.filter(
+                    or_(Outfit.gender == gender, Outfit.gender == 'unisex')
+                )
 
+        # Occasion filter (STRICT -- only matching occasion outfits)
+        if occasion and occasion.lower() not in ('all', ''):
+            query = query.filter(Outfit.occasion == occasion.lower())
+
+        outfits = query.all()
+
+        # Safety net: if DB filters returned nothing, fall back to full catalogue
+        if not outfits:
+            outfits = Outfit.query.all()
         # Step 3 â€“ Collaborative signal map {outfit_id: 0.0â€“1.0}
         collab_map = self._build_collaborative_map(profile)
 
@@ -258,7 +265,8 @@ class RecommendationEngine:
                     any(comp in oc or oc in comp for comp in compatible)
                     for oc in outfit_colors_lower
                 )
-                scores.append(0.90 if match else 0.40)
+                # Strong signal: match=1.0, mismatch=0.10
+                scores.append(1.0 if match else 0.10)
 
         # 2. User's preferred color list
         if preferences and preferences.preferred_colors and outfit.colors:
@@ -273,14 +281,29 @@ class RecommendationEngine:
         return round(sum(scores) / len(scores), 2) if scores else 0.55
 
     def _calculate_body_type_score(self, outfit, profile) -> float:
-        """Body type / shape compatibility (25 % weight)."""
+        """Body type / shape compatibility (25 % weight).
+
+        Priority:
+          1. outfit.body_type_compatibility field (explicit list, most accurate)
+          2. style_type keyword lookup (legacy fallback)
+        """
         if not profile or not profile.body_type:
             return 0.5
 
         body_type = profile.body_type.lower()
-        gender    = (profile.gender or '').lower()
-        mapping   = MALE_BODY_TYPE_STYLES if gender == 'male' else FEMALE_BODY_TYPE_STYLES
 
+        # Check the explicit body_type_compatibility list first
+        if outfit.body_type_compatibility:
+            compat = [bt.lower() for bt in outfit.body_type_compatibility]
+            if 'all' in compat:
+                return 0.85
+            if body_type in compat:
+                return 1.0
+            return 0.30  # explicitly incompatible
+
+        # Fallback: style_type keyword lookup
+        gender  = (profile.gender or '').lower()
+        mapping = MALE_BODY_TYPE_STYLES if gender == 'male' else FEMALE_BODY_TYPE_STYLES
         suitable = mapping.get(body_type, [])
         if outfit.style_type and any(s in outfit.style_type.lower() for s in suitable):
             return 0.90
@@ -343,34 +366,27 @@ class RecommendationEngine:
         else:
             gender_label = ''
 
+        # Build a short, clean search term: gender + category (2-3 words max)
         parts = []
-        # Only add gender prefix if not already present in the outfit name
-        if gender_label and gender_label.rstrip("'s") not in name_lower and "men" not in name_lower and "women" not in name_lower:
+        if gender_label:
             parts.append(gender_label)
+        # Use category if available (tuxedo, gown, etc.), else fall back to outfit name
+        if getattr(outfit, 'category', None):
+            parts.append(outfit.category)
+        elif outfit.name:
+            # Take first 3 words of the name only
+            parts.extend(outfit.name.split()[:3])
 
-        # Outfit name is the primary anchor
-        if outfit.name:
-            parts.append(outfit.name)
-        elif outfit.style_type:
-            parts.append(outfit.style_type)
-
-        # Add occasion/style context if not already in the name
-        if outfit.occasion and outfit.occasion.lower() not in name_lower:
-            parts.append(outfit.occasion)
-        if outfit.style_type and outfit.style_type.lower() not in name_lower:
-            parts.append(outfit.style_type)
-
-        search_term = ' '.join(parts[:4]) if parts else 'fashion outfit'
+        search_term = ' '.join(parts) if parts else 'fashion outfit'
         q = urllib.parse.quote_plus(search_term)
-        slug = urllib.parse.quote_plus(search_term.replace(' ', '-'))
 
         return {
-            'myntra':        f'https://www.myntra.com/{slug}',
-            'flipkart':      f'https://www.flipkart.com/search?q={q}&otracker=search',
-            'ajio':          f'https://www.ajio.com/search/?text={q}',
-            'meesho':        f'https://www.meesho.com/search?q={q}',
-            'nykaa_fashion': f'https://www.nykaafashion.com/search?q={q}',
-            'amazon':        f'https://www.amazon.in/s?k={q}&i=apparel',
-            'hm':            f'https://www2.hm.com/en_in/search-results.html?q={q}',
-            'zara':          f'https://www.zara.com/in/en/search?searchTerm={q}',
+            'myntra':   f'https://www.myntra.com/search?rawQuery={q}',
+            'flipkart': f'https://www.flipkart.com/search?q={q}',
+            'ajio':     f'https://www.ajio.com/search/?text={q}',
+            'meesho':   f'https://www.meesho.com/search?q={q}',
+            'nykaa':    f'https://www.nykaa.com/search/result/?q={q}&root=search',
+            'amazon':   f'https://www.amazon.in/s?k={q}&i=apparel',
+            'hm':       f'https://www2.hm.com/en_in/search-results.html?q={q}',
+            'zara':     f'https://www.zara.com/in/en/search?searchTerm={q}',
         }

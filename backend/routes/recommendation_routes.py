@@ -218,6 +218,42 @@ def get_collections():
             ).limit(limit).all()
         )
 
+        # ── 8. Based on Skin Tone ─────────────────────────────────────────
+        skin_tone_outfits = []
+        if profile and profile.skin_tone:
+            from services.recommendation_engine import SKIN_TONE_COMPATIBLE_COLORS
+            compatible_colors = SKIN_TONE_COMPATIBLE_COLORS.get(
+                profile.skin_tone.lower(), []
+            )
+            if compatible_colors:
+                # Fetch all gender-appropriate outfits and score by color match
+                all_outfits = gender_filter(Outfit.query).all()
+                matched = []
+                for o in all_outfits:
+                    if not o.colors:
+                        continue
+                    outfit_colors = [c.lower() for c in o.colors]
+                    if any(
+                        any(comp in oc or oc in comp for comp in compatible_colors)
+                        for oc in outfit_colors
+                    ):
+                        matched.append(o)
+                skin_tone_outfits = attach_links(matched[:limit])
+
+        # ── 9. For Your Body Shape ────────────────────────────────────────
+        body_shape_outfits = []
+        if profile and profile.body_type:
+            body_type = profile.body_type.lower()
+            all_outfits = gender_filter(Outfit.query).all()
+            matched = []
+            for o in all_outfits:
+                if not o.body_type_compatibility:
+                    continue
+                compat = [bt.lower() for bt in o.body_type_compatibility]
+                if 'all' in compat or body_type in compat:
+                    matched.append(o)
+            body_shape_outfits = attach_links(matched[:limit])
+
         return jsonify({
             'trending':   trending,
             'seasonal':   seasonal,
@@ -226,6 +262,8 @@ def get_collections():
             'sports':     sports,
             'minimalist': minimalist,
             'party':      party,
+            'skin_tone':  skin_tone_outfits,
+            'body_shape': body_shape_outfits,
         }), 200
 
     except Exception as e:

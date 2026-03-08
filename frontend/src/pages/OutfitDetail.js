@@ -6,14 +6,14 @@ import { FiArrowLeft, FiShoppingBag, FiStar } from 'react-icons/fi';
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const SHOP_LABELS = {
-  myntra:        { label: 'Myntra',    color: '#FF3F6C' },
-  flipkart:      { label: 'Flipkart', color: '#2874F0' },
-  ajio:          { label: 'Ajio',     color: '#E31E25' },
-  meesho:        { label: 'Meesho',   color: '#9B2D8E' },
-  nykaa_fashion: { label: 'Nykaa',    color: '#FC2779' },
-  amazon:        { label: 'Amazon',   color: '#FF9900' },
-  hm:            { label: 'H&M',      color: '#E50010' },
-  zara:          { label: 'Zara',     color: '#111111' },
+  myntra:   { label: 'Myntra',    color: '#FF3F6C' },
+  flipkart: { label: 'Flipkart', color: '#2874F0' },
+  ajio:     { label: 'Ajio',     color: '#E31E25' },
+  meesho:   { label: 'Meesho',   color: '#9B2D8E' },
+  nykaa:    { label: 'Nykaa',    color: '#FC2779' },
+  amazon:   { label: 'Amazon',   color: '#FF9900' },
+  hm:       { label: 'H&M',      color: '#E50010' },
+  zara:     { label: 'Zara',     color: '#111111' },
 };
 
 const GENDER_BADGE = {
@@ -97,6 +97,7 @@ const OutfitDetail = () => {
                   src={outfit.image_url}
                   alt={outfit.name}
                   className="w-full h-full object-cover"
+                  onError={(e) => { e.target.onerror = null; e.target.src = `https://loremflickr.com/600/900/fashion,outfit?lock=${outfit.id}`; }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">

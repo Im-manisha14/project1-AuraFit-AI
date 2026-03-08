@@ -241,6 +241,7 @@ const Trends = () => {
                         src={outfit.image_url}
                         alt={outfit.name}
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                        onError={(e) => { e.target.onerror = null; e.target.src = `https://loremflickr.com/600/900/fashion,outfit?lock=${outfit.id}`; }}
                       />
                     ) : (
                       <img

@@ -6,24 +6,26 @@ import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiHeart, FiUser, FiArrowRigh
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const COLLECTION_META = {
-  trending:   { title: 'Trending Right Now',   icon: '🔥' },
-  seasonal:   { title: 'Seasonal Picks',       icon: '🌤' },
-  casual:     { title: 'Casual Collection',    icon: '👕' },
-  formal:     { title: 'Formal & Work Wear',   icon: '💼' },
-  sports:     { title: 'Sports & Athleisure',  icon: '🏋' },
-  minimalist: { title: 'Minimalist Fashion',   icon: '🎯' },
-  party:      { title: 'Party & Date Night',   icon: '🎉' },
+  skin_tone:  { title: 'Based on Your Skin Tone', icon: '🎨' },
+  body_shape: { title: 'For Your Body Shape',      icon: '✨' },
+  trending:   { title: 'Trending Right Now',       icon: '🔥' },
+  seasonal:   { title: 'Seasonal Picks',           icon: '🌤' },
+  casual:     { title: 'Casual Collection',        icon: '👕' },
+  formal:     { title: 'Formal & Work Wear',       icon: '💼' },
+  sports:     { title: 'Sports & Athleisure',      icon: '🏋' },
+  minimalist: { title: 'Minimalist Fashion',       icon: '🎯' },
+  party:      { title: 'Party & Date Night',       icon: '🎉' },
 };
 
 const SHOP_LABELS = {
-  myntra:        { label: 'Myntra',    color: '#FF3F6C' },
-  flipkart:      { label: 'Flipkart', color: '#2874F0' },
-  ajio:          { label: 'Ajio',     color: '#E31E25' },
-  meesho:        { label: 'Meesho',   color: '#9B2D8E' },
-  nykaa_fashion: { label: 'Nykaa',    color: '#FC2779' },
-  amazon:        { label: 'Amazon',   color: '#FF9900' },
-  hm:            { label: 'H&M',      color: '#E50010' },
-  zara:          { label: 'Zara',     color: '#111111' },
+  myntra:   { label: 'Myntra',    color: '#FF3F6C' },
+  flipkart: { label: 'Flipkart', color: '#2874F0' },
+  ajio:     { label: 'Ajio',     color: '#E31E25' },
+  meesho:   { label: 'Meesho',   color: '#9B2D8E' },
+  nykaa:    { label: 'Nykaa',    color: '#FC2779' },
+  amazon:   { label: 'Amazon',   color: '#FF9900' },
+  hm:       { label: 'H&M',      color: '#E50010' },
+  zara:     { label: 'Zara',     color: '#111111' },
 };
 
 const GENDER_BADGE = {
@@ -72,7 +74,7 @@ const Recommendations = () => {
     setCollectionsLoading(true);
     try {
       const res = await recommendationAPI.getCollections({ season: 'all', limit: 8 });
-      setCollections(res.data.collections || {});
+      setCollections(res.data || {});
     } catch (err) {
       console.error('Error loading collections:', err);
     } finally {
@@ -137,7 +139,10 @@ const Recommendations = () => {
       setRecommendations(response.data.recommendations || []);
     } catch (error) {
       console.error('Error generating recommendations:', error);
-      setShowProfileModal(true);
+      // Only show profile modal if the server says profile is incomplete (400)
+      if (error.response?.status === 400) {
+        setShowProfileModal(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -323,6 +328,7 @@ const Recommendations = () => {
                         src={rec.outfit.image_url}
                         alt={rec.outfit.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        onError={(e) => { e.target.onerror = null; e.target.src = `https://loremflickr.com/600/900/fashion,outfit?lock=${rec.outfit.id}`; }}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
@@ -571,6 +577,7 @@ const Recommendations = () => {
                                 src={outfit.image_url}
                                 alt={outfit.name}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                onError={(e) => { e.target.onerror = null; e.target.src = `https://loremflickr.com/600/900/fashion,outfit?lock=${outfit.id}`; }}
                               />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">

@@ -18,13 +18,19 @@ class Outfit(db.Model):
     gender = db.Column(db.String(20), default='unisex')  # male, female, unisex
     occasion = db.Column(db.String(50))
     season = db.Column(db.String(20))
+    category = db.Column(db.String(50))      # tuxedo, suit, gown, t-shirt, etc.
     style_type = db.Column(db.String(50))
     colors = db.Column(db.JSON)
+    pattern = db.Column(db.String(50), default='solid')  # solid, floral, striped, etc.
+    sleeve_type = db.Column(db.String(30))  # full, half, sleeveless
     
     # Fabric info
     fabric_types = db.Column(db.JSON)
     comfort_score = db.Column(db.Float)
     
+    # Body type compatibility — list of compatible body shapes e.g. ['hourglass', 'pear', 'all']
+    body_type_compatibility = db.Column(db.JSON)
+
     # Images
     image_url = db.Column(db.String(255))
     
@@ -47,10 +53,14 @@ class Outfit(db.Model):
             'gender': self.gender,
             'occasion': self.occasion,
             'season': self.season,
+            'category': self.category,
             'style_type': self.style_type,
             'colors': self.colors,
+            'pattern': self.pattern,
+            'sleeve_type': self.sleeve_type,
             'fabric_types': self.fabric_types,
             'comfort_score': self.comfort_score,
+            'body_type_compatibility': self.body_type_compatibility,
             'is_trending': self.is_trending,
             'trend_score': self.trend_score,
             'image_url': self.image_url
