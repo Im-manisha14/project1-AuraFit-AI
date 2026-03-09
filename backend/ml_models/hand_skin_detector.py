@@ -14,11 +14,11 @@ class HandSkinToneDetector:
     
     def __init__(self):
         self.skin_tone_categories = {
-            'fair': {'range': (200, 255), 'colors': ['lavender', 'pastel blue', 'soft pink']},
-            'light': {'range': (170, 199), 'colors': ['peach', 'beige', 'mint green']},
-            'medium': {'range': (140, 169), 'colors': ['emerald', 'teal', 'mustard']},
-            'olive': {'range': (110, 139), 'colors': ['earth tones', 'maroon', 'cream']},
-            'deep': {'range': (0, 109), 'colors': ['royal blue', 'yellow', 'white']}
+            'fair':   {'range': (200, 255), 'colors': ['Navy', 'Emerald Green', 'Burgundy', 'Charcoal Grey', 'Royal Blue']},
+            'light':  {'range': (170, 199), 'colors': ['Soft Blue', 'Lavender', 'Peach', 'Mint Green', 'Rose Pink']},
+            'medium': {'range': (140, 169), 'colors': ['Olive Green', 'Beige', 'Mustard Yellow', 'Forest Green', 'Cream']},
+            'olive':  {'range': (110, 139), 'colors': ['Rust', 'Coral', 'Cream', 'Charcoal', 'Deep Teal']},
+            'deep':   {'range': (0,   109), 'colors': ['White', 'Gold', 'Royal Blue', 'Magenta', 'Bright Yellow']},
         }
     
     def detect_skin_from_image(self, image_data: str) -> dict:

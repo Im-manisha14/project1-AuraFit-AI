@@ -140,6 +140,9 @@ def get_collections():
                 result.append(d)
             return result
 
+        from sqlalchemy import func as sqlfunc
+        import random
+
         # ── 1. Trending ── most interaction events first ──────────────────
         interaction_counts = (
             db.session.query(
@@ -152,16 +155,21 @@ def get_collections():
         trending_q = (
             db.session.query(Outfit)
             .outerjoin(interaction_counts, Outfit.id == interaction_counts.c.outfit_id)
-            .order_by(desc(interaction_counts.c.cnt))
+            .order_by(desc(interaction_counts.c.cnt), desc(Outfit.trend_score), desc(Outfit.id))
         )
         if gender in ('male', 'female'):
             trending_q = trending_q.filter(
                 or_(Outfit.gender == gender, Outfit.gender == 'unisex', Outfit.gender.is_(None))
             )
         trending = attach_links(trending_q.limit(limit).all())
-        # fallback if no interaction data yet
+        # fallback when no interaction data yet: order by trend_score desc so
+        # we don't always get the lowest IDs
         if len(trending) < 4:
-            trending = attach_links(gender_filter(Outfit.query).limit(limit).all())
+            trending = attach_links(
+                gender_filter(Outfit.query)
+                .order_by(desc(Outfit.trend_score), desc(Outfit.id))
+                .limit(limit).all()
+            )
 
         # ── 2. Seasonal Picks ─────────────────────────────────────────────
         if season and season != 'all':
@@ -172,18 +180,23 @@ def get_collections():
             )
         else:
             seasonal_q = gender_filter(Outfit.query)
-        seasonal = attach_links(seasonal_q.limit(limit).all())
+        # Order by created_at desc so newest outfits surface first
+        seasonal = attach_links(seasonal_q.order_by(desc(Outfit.created_at)).limit(limit).all())
 
         # ── 3. Casual Collection ──────────────────────────────────────────
         casual = attach_links(
-            gender_filter(Outfit.query.filter(Outfit.occasion == 'casual')).limit(limit).all()
+            gender_filter(Outfit.query.filter(Outfit.occasion == 'casual'))
+            .order_by(Outfit.id)
+            .limit(limit).all()
         )
 
         # ── 4. Formal & Work Wear ─────────────────────────────────────────
         formal = attach_links(
             gender_filter(
                 Outfit.query.filter(Outfit.occasion.in_(['formal', 'work']))
-            ).limit(limit).all()
+            )
+            .order_by(desc(Outfit.trend_score), Outfit.id)
+            .limit(limit).all()
         )
 
         # ── 5. Sports & Athleisure ────────────────────────────────────────
@@ -196,7 +209,9 @@ def get_collections():
                         Outfit.style_type.ilike('%athlet%'),
                     )
                 )
-            ).limit(limit).all()
+            )
+            .order_by(Outfit.id)
+            .limit(limit).all()
         )
 
         # ── 6. Minimalist Fashion ─────────────────────────────────────────
@@ -208,17 +223,23 @@ def get_collections():
                         Outfit.style_type.ilike('%minimal%'),
                     )
                 )
-            ).limit(limit).all()
+            )
+            .order_by(desc(Outfit.id))
+            .limit(limit).all()
         )
 
         # ── 7. Party & Date Night ─────────────────────────────────────────
         party = attach_links(
             gender_filter(
                 Outfit.query.filter(Outfit.occasion.in_(['party', 'date']))
-            ).limit(limit).all()
+            )
+            .order_by(desc(Outfit.trend_score), desc(Outfit.id))
+            .limit(limit).all()
         )
 
         # ── 8. Based on Skin Tone ─────────────────────────────────────────
+        # Pull outfits whose color palette matches the user's skin tone,
+        # spread across all occasions so the row isn't dominated by one type.
         skin_tone_outfits = []
         if profile and profile.skin_tone:
             from services.recommendation_engine import SKIN_TONE_COMPATIBLE_COLORS
@@ -226,8 +247,8 @@ def get_collections():
                 profile.skin_tone.lower(), []
             )
             if compatible_colors:
-                # Fetch all gender-appropriate outfits and score by color match
-                all_outfits = gender_filter(Outfit.query).all()
+                # Fetch ALL gender-appropriate outfits (no occasion restriction)
+                all_outfits = gender_filter(Outfit.query).order_by(Outfit.occasion, Outfit.id).all()
                 matched = []
                 for o in all_outfits:
                     if not o.colors:
@@ -238,13 +259,16 @@ def get_collections():
                         for oc in outfit_colors
                     ):
                         matched.append(o)
+                # Shuffle to surface a variety of occasions each time
+                random.shuffle(matched)
                 skin_tone_outfits = attach_links(matched[:limit])
 
         # ── 9. For Your Body Shape ────────────────────────────────────────
         body_shape_outfits = []
         if profile and profile.body_type:
             body_type = profile.body_type.lower()
-            all_outfits = gender_filter(Outfit.query).all()
+            # Order by occasion so results are evenly spread
+            all_outfits = gender_filter(Outfit.query).order_by(Outfit.occasion, desc(Outfit.id)).all()
             matched = []
             for o in all_outfits:
                 if not o.body_type_compatibility:

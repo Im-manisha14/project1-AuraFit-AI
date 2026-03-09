@@ -9,26 +9,40 @@ if TYPE_CHECKING:
 # Skin-tone â†’ compatible outfit color palette
 # ---------------------------------------------------------------------------
 SKIN_TONE_COMPATIBLE_COLORS = {
+    # Enhances contrast and balances lighter skin tones
+    # Spec primary: Navy, Emerald Green, Burgundy, Charcoal Grey, Royal Blue
     'fair': [
-        'lavender', 'pastel blue', 'soft pink', 'navy', 'emerald',
-        'burgundy', 'black', 'white', 'gray', 'silver', 'mint', 'dusty rose',
+        'navy', 'emerald', 'burgundy', 'charcoal', 'royal blue',
+        # variants / related
+        'black', 'white', 'grey', 'gray', 'silver', 'dark blue', 'forest green',
     ],
+    # Creates a balanced and vibrant appearance
+    # Spec primary: Soft Blue, Lavender, Peach, Mint Green, Rose Pink
     'light': [
-        'peach', 'beige', 'mint', 'coral', 'olive', 'warm brown',
-        'dusty rose', 'blush', 'camel', 'ivory', 'terracotta', 'rust',
+        'soft blue', 'lavender', 'peach', 'mint green', 'rose pink',
+        # variants / related
+        'blush', 'lilac', 'pastel', 'baby blue', 'dusty rose', 'mint', 'pink',
     ],
+    # Highlights natural warm undertones
+    # Spec primary: Olive Green, Beige, Mustard Yellow, Forest Green, Cream
     'medium': [
-        'emerald', 'teal', 'mustard', 'purple', 'royal blue', 'terracotta',
-        'deep purple', 'chocolate', 'rust', 'jewel tone', 'burnt orange', 'forest green',
-        'olive', 'beige',
+        'olive green', 'beige', 'mustard yellow', 'forest green', 'cream',
+        # variants / related
+        'olive', 'mustard', 'camel', 'khaki', 'tan', 'terracotta', 'rust',
     ],
+    # Complements olive undertones
+    # Spec primary: Rust, Coral, Cream, Charcoal, Deep Teal
     'olive': [
-        'earth tones', 'maroon', 'cream', 'gold', 'forest green', 'camel',
-        'rust', 'chocolate brown', 'khaki', 'warm brown', 'brick red', 'mustard',
+        'rust', 'coral', 'cream', 'charcoal', 'deep teal',
+        # variants / related
+        'teal', 'brick red', 'warm brown', 'gold', 'earth', 'brown', 'maroon',
     ],
+    # Creates strong visual contrast and enhances darker skin tones
+    # Spec primary: White, Gold, Royal Blue, Magenta, Bright Yellow
     'deep': [
-        'royal blue', 'yellow', 'white', 'orange', 'electric blue', 'fuchsia',
-        'gold', 'cobalt', 'bright red', 'hot pink', 'lime green',
+        'white', 'gold', 'royal blue', 'magenta', 'bright yellow',
+        # variants / related
+        'yellow', 'electric blue', 'fuchsia', 'cobalt', 'hot pink', 'purple',
     ],
 }
 
@@ -114,6 +128,15 @@ class RecommendationEngine:
         # Safety net: if DB filters returned nothing, fall back to full catalogue
         if not outfits:
             outfits = Outfit.query.all()
+
+        # Step 2 – Skin-tone pre-filter: remove outfits whose color palette is
+        # incompatible with the user's detected skin tone.  Outfits with no
+        # colors field are kept (cannot be evaluated).  A safety net ensures at
+        # least 3 results are always returned even if the filter is too strict.
+        skin_tone = getattr(profile, 'skin_tone', None) if profile else None
+        if skin_tone:
+            outfits = self._filter_by_skin_tone(outfits, skin_tone)
+
         # Step 3 â€“ Collaborative signal map {outfit_id: 0.0â€“1.0}
         collab_map = self._build_collaborative_map(profile)
 
@@ -229,6 +252,48 @@ class RecommendationEngine:
         except Exception as exc:
             print(f"[RecommendationEngine] Collaborative map error: {exc}")
             return {}
+
+    # -----------------------------------------------------------------------
+    # Skin-tone pre-filter
+    # -----------------------------------------------------------------------
+
+    def _filter_by_skin_tone(self, outfits: list, skin_tone: str) -> list:
+        """
+        Remove outfits whose color palette is incompatible with the user's
+        skin tone.
+
+        Filtering rules:
+          - Outfits that have no colors defined are kept (cannot be judged).
+          - An outfit is compatible when at least one of its colors (substring)
+            appears in the skin tone's compatible color list.
+          - Safety net: if fewer than 3 outfits survive the filter the original
+            unfiltered list is returned so the user always sees results.
+
+        This implements the "Skin Tone Compatibility Filtering Layer" described
+        in the product spec: outfits with no matching colors are dropped before
+        scoring so they never appear in the ranked results.
+        """
+        tone_key = skin_tone.lower()
+        compatible = SKIN_TONE_COMPATIBLE_COLORS.get(tone_key, [])
+        if not compatible:
+            return outfits
+
+        filtered = []
+        for outfit in outfits:
+            if not outfit.colors:
+                # Keep: no color info available, cannot disqualify
+                filtered.append(outfit)
+                continue
+            outfit_colors_lower = [c.lower() for c in outfit.colors]
+            is_compatible = any(
+                any(comp in oc or oc in comp for comp in compatible)
+                for oc in outfit_colors_lower
+            )
+            if is_compatible:
+                filtered.append(outfit)
+
+        # Safety net: always return at least 3 outfits
+        return filtered if len(filtered) >= 3 else outfits
 
     # -----------------------------------------------------------------------
     # Scoring helpers

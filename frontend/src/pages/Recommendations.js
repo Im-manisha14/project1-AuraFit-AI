@@ -67,7 +67,6 @@ const Recommendations = () => {
 
   useEffect(() => {
     checkProfileStatus();
-    loadCollections();
   }, []);
 
   const loadCollections = async () => {
@@ -104,6 +103,7 @@ const Recommendations = () => {
         try {
           const response = await recommendationAPI.generate({ occasion: 'casual', season: 'all', limit: 10 });
           setRecommendations(response.data.recommendations || []);
+          loadCollections();
         } catch (err) {
           console.error('Auto-generate error:', err);
         } finally {
@@ -137,6 +137,7 @@ const Recommendations = () => {
     try {
       const response = await recommendationAPI.generate(filters);
       setRecommendations(response.data.recommendations || []);
+      loadCollections();
     } catch (error) {
       console.error('Error generating recommendations:', error);
       // Only show profile modal if the server says profile is incomplete (400)
