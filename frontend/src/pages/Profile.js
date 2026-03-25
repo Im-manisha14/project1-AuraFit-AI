@@ -249,10 +249,10 @@ const Profile = () => {
         setDetectionResult(result);
         setMessage(`✅ Skin tone detected: ${result.skin_tone}!`);
         
-        // Stop camera after successful detection
+        // Keep camera open for 3 seconds to show detected color, then close
         setTimeout(() => {
           stopCamera();
-        }, 2000);
+        }, 3000);
       } else {
         setMessage(`❌ ${response.data.error}`);
       }
@@ -445,7 +445,28 @@ const Profile = () => {
                 style={{ minHeight: '200px', maxHeight: '400px' }}
               />
               
-              {/* Enhanced hand guide overlay */}
+              {/* Display detected skin tone on camera if available */}
+              {detectionResult && detectionResult.rgb_value && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-lg">
+                  <div className="text-center">
+                    <div
+                      className="w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 rounded-full mb-3 sm:mb-4 shadow-2xl border-4 border-white animate-pulse"
+                      style={{ backgroundColor: `rgb(${detectionResult.rgb_value.join(',')})` }}
+                    />
+                    <div className="bg-black bg-opacity-80 px-3 sm:px-4 py-2 sm:py-3 rounded-lg">
+                      <p className="text-white font-bold text-lg sm:text-xl lg:text-2xl">
+                        {detectionResult.skin_tone}
+                      </p>
+                      <p className="text-gray-300 text-xs sm:text-sm mt-1">
+                        Brightness: {detectionResult.brightness}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Enhanced hand guide overlay (only show when not detected) */}
+              {!detectionResult && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-40 h-48 sm:w-48 sm:h-56 lg:w-56 lg:h-64 border-2 sm:border-4 border-dashed border-white rounded-xl flex items-center justify-center bg-black bg-opacity-20">
                   <div className="text-center">
@@ -456,7 +477,7 @@ const Profile = () => {
                   </div>
                 </div>
               </div>
-            </div>
+              )}
 
             <canvas ref={canvasRef} className="hidden" />
 
@@ -464,10 +485,10 @@ const Profile = () => {
               <button
                 type="button"
                 onClick={captureAndDetect}
-                disabled={detecting}
+                disabled={detecting || detectionResult}
                 className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 font-medium text-sm sm:text-base"
               >
-                {detecting ? '🔍 Analyzing...' : '✨ Detect Skin Tone'}
+                {detecting ? '🔍 Analyzing...' : detectionResult ? '✅ Complete' : '✨ Detect Skin Tone'}
               </button>
               <button
                 type="button"
