@@ -70,7 +70,7 @@ const Register = () => {
   return (
     <div className="min-h-screen flex items-center justify-center px-3 sm:px-4 py-6 sm:py-12">
       <div className="max-w-md w-full">
-        <div className="card">
+        <div className="card p-5 sm:p-8">
           <div className="text-center mb-6 sm:mb-8">
             <div className="flex justify-center mb-3 sm:mb-4">
               <img src="/logo.svg" alt="AuraFit" className="h-12 w-12 sm:h-16 sm:w-16" />

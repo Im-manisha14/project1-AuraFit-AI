@@ -73,16 +73,16 @@ const OutfitDetail = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Back Navigation */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+      <div className="bg-white border-b border-gray-200 px-3 sm:px-4 md:px-6 py-3 sm:py-4">
         <button
           onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors font-medium text-sm"
+          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors font-medium text-xs sm:text-sm"
         >
           <FiArrowLeft /> Back to Recommendations
         </button>
       </div>
 
-      <div className="container mx-auto px-6 py-10 max-w-5xl">
+      <div className="container mx-auto px-3 sm:px-4 md:px-6 py-6 sm:py-8 md:py-10 max-w-5xl">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -91,7 +91,7 @@ const OutfitDetail = () => {
         >
           <div className="grid grid-cols-1 md:grid-cols-2">
             {/* Left — Image */}
-            <div className="relative h-96 md:h-auto bg-gray-100 min-h-80">
+            <div className="relative h-64 sm:h-80 md:h-auto bg-gray-100 min-h-64 sm:min-h-80 md:min-h-96">
               {outfit.image_url ? (
                 <img
                   src={outfit.image_url}
@@ -101,21 +101,21 @@ const OutfitDetail = () => {
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
-                  <HiOutlineSparkles className="text-8xl text-gray-300" />
+                  <HiOutlineSparkles className="text-6xl sm:text-8xl text-gray-300" />
                 </div>
               )}
               {outfit.is_trending && (
-                <div className="absolute top-4 left-4 bg-amber-600 text-white px-3 py-1 text-xs font-bold tracking-widest uppercase">
+                <div className="absolute top-3 sm:top-4 left-3 sm:left-4 bg-amber-600 text-white px-2 sm:px-3 py-0.5 sm:py-1 text-xs font-bold tracking-widest uppercase">
                   Trending
                 </div>
               )}
             </div>
 
             {/* Right — Details */}
-            <div className="p-8 flex flex-col gap-5">
+            <div className="p-4 sm:p-6 md:p-8 flex flex-col gap-4 sm:gap-5">
               {/* Title + Badge */}
               <div>
-                <div className="flex items-center gap-3 mb-2">
+                <div className="flex flex-wrap items-center gap-2 mb-3">
                   <span
                     className="text-xs font-bold px-2 py-0.5 rounded-full tracking-wide uppercase"
                     style={{ background: badge.bg, color: badge.color }}
@@ -133,44 +133,44 @@ const OutfitDetail = () => {
                     </span>
                   )}
                 </div>
-                <h1 className="text-3xl font-bold text-gray-900 tracking-tight leading-snug">{outfit.name}</h1>
+                <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 tracking-tight leading-snug">{outfit.name}</h1>
                 {outfit.style_type && (
-                  <p className="text-sm text-gray-500 mt-1 capitalize tracking-wide">{outfit.style_type}</p>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-1 capitalize tracking-wide">{outfit.style_type}</p>
                 )}
               </div>
 
               {/* Description */}
               {outfit.description && (
-                <p className="text-gray-600 font-light leading-relaxed border-l-4 border-amber-500 pl-4">
+                <p className="text-sm sm:text-base text-gray-600 font-light leading-relaxed border-l-4 border-amber-500 pl-3 sm:pl-4">
                   {outfit.description}
                 </p>
               )}
 
               {/* Dress Structure */}
-              <div className="bg-gray-50 border border-gray-100 p-5">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Outfit Breakdown</p>
-                <div className="grid grid-cols-1 gap-3">
+              <div className="bg-gray-50 border border-gray-100 p-4 sm:p-5">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 sm:mb-4">Outfit Breakdown</p>
+                <div className="grid grid-cols-1 gap-2 sm:gap-3">
                   {outfit.top && (
-                    <div className="flex gap-3 items-start">
-                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-20 flex-shrink-0 pt-0.5">Top</span>
+                    <div className="flex gap-2 sm:gap-3 items-start">
+                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-16 sm:w-20 flex-shrink-0 pt-0.5">Top</span>
                       <span className="text-sm text-gray-800">{outfit.top}</span>
                     </div>
                   )}
                   {outfit.bottom && (
-                    <div className="flex gap-3 items-start">
-                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-20 flex-shrink-0 pt-0.5">Bottom</span>
+                    <div className="flex gap-2 sm:gap-3 items-start">
+                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-16 sm:w-20 flex-shrink-0 pt-0.5">Bottom</span>
                       <span className="text-sm text-gray-800">{outfit.bottom}</span>
                     </div>
                   )}
                   {outfit.shoes && (
-                    <div className="flex gap-3 items-start">
-                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-20 flex-shrink-0 pt-0.5">Shoes</span>
+                    <div className="flex gap-2 sm:gap-3 items-start">
+                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-16 sm:w-20 flex-shrink-0 pt-0.5">Shoes</span>
                       <span className="text-sm text-gray-800">{outfit.shoes}</span>
                     </div>
                   )}
                   {outfit.accessories?.length > 0 && (
-                    <div className="flex gap-3 items-start">
-                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-20 flex-shrink-0 pt-0.5">Accessories</span>
+                    <div className="flex gap-2 sm:gap-3 items-start">
+                      <span className="text-xs font-bold text-amber-600 uppercase tracking-widest w-16 sm:w-20 flex-shrink-0 pt-0.5">Accessories</span>
                       <span className="text-sm text-gray-800">{outfit.accessories.join(', ')}</span>
                     </div>
                   )}
@@ -183,7 +183,7 @@ const OutfitDetail = () => {
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Color Palette</p>
                   <div className="flex flex-wrap gap-2">
                     {outfit.colors.map((color, i) => (
-                      <span key={i} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 font-medium tracking-wide uppercase border border-gray-200">
+                      <span key={i} className="text-xs px-2 sm:px-3 py-1 sm:py-1.5 bg-gray-100 text-gray-700 font-medium tracking-wide uppercase border border-gray-200">
                         {color}
                       </span>
                     ))}
@@ -193,7 +193,7 @@ const OutfitDetail = () => {
 
               {/* Fabric & Comfort */}
               {(outfit.fabric_types?.length > 0 || outfit.comfort_score != null) && (
-                <div className="flex flex-wrap gap-4">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4">
                   {outfit.fabric_types?.length > 0 && (
                     <div>
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Fabrics</p>
@@ -219,7 +219,7 @@ const OutfitDetail = () => {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setShopOpen(!shopOpen)}
-                    className="w-full border border-amber-600 text-amber-700 py-3 font-medium text-xs tracking-widest uppercase hover:bg-amber-50 transition-colors flex items-center justify-center gap-2 mb-2"
+                    className="w-full border border-amber-600 text-amber-700 py-2.5 sm:py-3 font-medium text-xs sm:text-sm tracking-widest uppercase hover:bg-amber-50 transition-colors flex items-center justify-center gap-2 mb-2 min-h-10 sm:min-h-11"
                   >
                     <FiShoppingBag />
                     <span>{shopOpen ? 'Hide Shopping Links' : 'Shop This Look'}</span>
@@ -228,7 +228,7 @@ const OutfitDetail = () => {
                     <motion.div
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="grid grid-cols-4 gap-2"
+                      className="grid grid-cols-3 sm:grid-cols-4 gap-2"
                     >
                       {Object.entries(outfit.shopping_links).map(([platform, url]) => {
                         const s = SHOP_LABELS[platform];

@@ -221,25 +221,25 @@ const Recommendations = () => {
       </motion.div>
 
       {/* Filters Section */}
-      <div className="container mx-auto px-6 py-12">
+      <div className="container mx-auto px-3 sm:px-4 md:px-6 py-8 sm:py-12">
         <motion.div 
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.3 }}
-          className="bg-white border border-gray-200 p-8 shadow-sm mb-12"
+          className="bg-white border border-gray-200 p-5 sm:p-6 md:p-8 shadow-sm mb-8 sm:mb-12"
         >
-          <h2 className="text-2xl font-bold text-gray-900 mb-6 tracking-tight">Customize Your Recommendations</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-5 sm:mb-6 tracking-tight">Customize Your Recommendations</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-5 md:gap-6 mb-6 sm:mb-8">
             <div>
-              <label className="block text-gray-900 font-medium mb-3 text-sm tracking-wide uppercase flex items-center space-x-2">
-                <FiCalendar className="text-amber-600" />
+              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
+                <FiCalendar className="text-amber-600 text-sm sm:text-base" />
                 <span>Occasion</span>
               </label>
               <select
                 name="occasion"
                 value={filters.occasion}
                 onChange={handleFilterChange}
-                className="w-full px-4 py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900"
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
               >
                 <option value="casual">Casual</option>
                 <option value="formal">Formal</option>
@@ -250,15 +250,15 @@ const Recommendations = () => {
               </select>
             </div>
             <div>
-              <label className="block text-gray-900 font-medium mb-3 text-sm tracking-wide uppercase flex items-center space-x-2">
-                <FiTrendingUp className="text-amber-600" />
+              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
+                <FiTrendingUp className="text-amber-600 text-sm sm:text-base" />
                 <span>Season</span>
               </label>
               <select
                 name="season"
                 value={filters.season}
                 onChange={handleFilterChange}
-                className="w-full px-4 py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900"
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
               >
                 <option value="all">All Seasons</option>
                 <option value="summer">Summer</option>
@@ -268,15 +268,15 @@ const Recommendations = () => {
               </select>
             </div>
             <div>
-              <label className="block text-gray-900 font-medium mb-3 text-sm tracking-wide uppercase flex items-center space-x-2">
-                <FiAward className="text-amber-600" />
-                <span>Number of Results</span>
+              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
+                <FiAward className="text-amber-600 text-sm sm:text-base" />
+                <span>Results</span>
               </label>
               <select
                 name="limit"
                 value={filters.limit}
                 onChange={handleFilterChange}
-                className="w-full px-4 py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900"
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
               >
                 <option value="5">5</option>
                 <option value="10">10</option>
@@ -289,11 +289,11 @@ const Recommendations = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={generateRecommendations}
-            className="w-full bg-gray-900 text-white py-4 font-medium text-sm tracking-widest uppercase hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+            className="w-full bg-gray-900 text-white py-3 sm:py-4 font-medium text-xs sm:text-sm tracking-widest uppercase hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 min-h-10 sm:min-h-12"
             disabled={loading}
           >
             <HiOutlineSparkles className={loading ? 'animate-spin' : ''} />
-            <span>{loading ? 'Generating Recommendations...' : 'Generate Recommendations'}</span>
+            <span>{loading ? 'Generating...' : 'Generate Recommendations'}</span>
           </motion.button>
         </motion.div>
 

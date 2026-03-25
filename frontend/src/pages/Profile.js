@@ -201,17 +201,28 @@ const Profile = () => {
 
     try {
       const canvas = canvasRef.current;
+      const videoWidth = video.videoWidth || 640;
+      const videoHeight = video.videoHeight || 480;
       
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
+      // CROP ONLY CENTER REGION (where hand is placed in guide box)
+      // Guide box is: 25%-75% horizontally, 20%-80% vertically
+      const cropX = Math.floor(videoWidth * 0.25);
+      const cropY = Math.floor(videoHeight * 0.20);
+      const cropWidth = Math.floor(videoWidth * 0.50);  // 25% to 75%
+      const cropHeight = Math.floor(videoHeight * 0.60); // 20% to 80%
       
+      // Set canvas size to cropped region
+      canvas.width = cropWidth;
+      canvas.height = cropHeight;
+      
+      // Draw ONLY the cropped region (removes background noise)
       const context = canvas.getContext('2d');
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      context.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
       
       // Convert to base64 with high quality
-      const imageData = canvas.toDataURL('image/jpeg', 0.98);  // Higher quality
+      const imageData = canvas.toDataURL('image/jpeg', 0.98);
       
-      console.log('Captured image size:', imageData.length, 'Canvas size:', canvas.width, 'x', canvas.height);
+      console.log('Cropped image size:', cropWidth, 'x', cropHeight, 'Original:', videoWidth, 'x', videoHeight);
       
       // Send to backend
       const token = localStorage.getItem('access_token');

@@ -65,7 +65,7 @@ const Trends = () => {
           backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(255,255,255,.03) 35px, rgba(255,255,255,.03) 70px)'
         }}></div>
         
-        <div className="container mx-auto px-6 relative z-10">
+        <div className="container mx-auto px-3 sm:px-4 md:px-6 relative z-10">
           <motion.div
             initial={{ y: 30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -76,16 +76,16 @@ const Trends = () => {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ duration: 0.5, type: "spring", delay: 0.3 }}
-              className="inline-block mb-6"
+              className="inline-block mb-4 sm:mb-6"
             >
-              <FiTrendingUp className="text-7xl text-amber-500 mx-auto drop-shadow-lg" />
+              <FiTrendingUp className="text-5xl sm:text-6xl lg:text-7xl text-amber-500 mx-auto drop-shadow-lg" />
             </motion.div>
             
             <motion.h1 
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 0.8, delay: 0.4 }}
-              className="text-6xl font-bold mb-6 tracking-tight drop-shadow-lg"
+              className="text-3xl sm:text-5xl lg:text-6xl font-bold mb-4 sm:mb-6 tracking-tight drop-shadow-lg"
             >
               Fashion Trends 2026
             </motion.h1>
@@ -95,8 +95,8 @@ const Trends = () => {
               animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 0.8, delay: 0.5 }}
             >
-              <div className="w-24 h-1 bg-amber-600 mx-auto mb-6"></div>
-              <p className="text-xl text-gray-200 font-light leading-relaxed max-w-2xl mx-auto drop-shadow-md">
+              <div className="w-20 sm:w-24 h-1 bg-amber-600 mx-auto mb-6"></div>
+              <p className="text-base sm:text-lg md:text-xl text-gray-200 font-light leading-relaxed max-w-2xl mx-auto drop-shadow-md px-3">
                 Discover the hottest fashion trends and stay ahead of the curve with our curated collection of luxury styles
               </p>
             </motion.div>
@@ -105,38 +105,38 @@ const Trends = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.6 }}
-              className="mt-8 flex items-center justify-center space-x-2 text-amber-500"
+              className="mt-6 sm:mt-8 flex items-center justify-center space-x-2 text-amber-500"
             >
-              <div className="w-12 h-px bg-amber-500"></div>
-              <span className="text-sm tracking-widest uppercase drop-shadow-md">Curated for Excellence</span>
-              <div className="w-12 h-px bg-amber-500"></div>
+              <div className="w-8 sm:w-12 h-px bg-amber-500"></div>
+              <span className="text-xs sm:text-sm tracking-widest uppercase drop-shadow-md">Curated for Excellence</span>
+              <div className="w-8 sm:w-12 h-px bg-amber-500"></div>
             </motion.div>
           </motion.div>
         </div>
       </motion.div>
 
-      <div className="container mx-auto px-6 py-16">
+      <div className="container mx-auto px-3 sm:px-4 md:px-6 py-12 sm:py-14 md:py-16">
         {/* Trending Colors & Styles */}
         <motion.div 
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.8 }}
-          className="mb-20"
+          className="mb-12 sm:mb-16 md:mb-20"
         >
           <div className="bg-white border border-gray-200 shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-8">
-              <h2 className="text-3xl font-bold mb-2 tracking-tight">What's Hot Right Now</h2>
-              <p className="text-gray-300 font-light">The season's most coveted colors and styles</p>
+            <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-6 sm:p-8">
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2 tracking-tight">What's Hot Right Now</h2>
+              <p className="text-gray-300 font-light text-sm sm:text-base">The season's most coveted colors and styles</p>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 p-10">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:gap-10 md:gap-12 p-6 sm:p-8 md:p-10">
               <div>
-                <div className="flex items-center space-x-3 mb-6">
-                  <HiOutlineSparkles className="text-3xl text-amber-600" />
-                  <h3 className="text-2xl font-bold text-gray-900">Trending Colors</h3>
+                <div className="flex items-center space-x-3 mb-5 sm:mb-6">
+                  <HiOutlineSparkles className="text-2xl sm:text-3xl text-amber-600" />
+                  <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Trending Colors</h3>
                 </div>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap gap-2 sm:gap-3">
                   {[
                     { color: '#0A0A0A', name: 'Deep Black' },
                     { color: '#2C4A52', name: 'Dark Teal' },

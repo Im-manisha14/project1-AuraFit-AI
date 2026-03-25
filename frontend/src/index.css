@@ -40,19 +40,19 @@ code {
 }
 
 .btn-primary {
-  @apply bg-gray-900 text-white font-medium py-4 px-8 hover:bg-gray-800 transition-all duration-300 shadow-sm hover:shadow-md text-sm tracking-widest uppercase;
+  @apply bg-gray-900 text-white font-medium py-3 sm:py-4 px-4 sm:px-8 hover:bg-gray-800 transition-all duration-300 shadow-sm hover:shadow-md text-xs sm:text-sm tracking-widest uppercase min-h-10 sm:min-h-12 flex items-center justify-center;
 }
 
 .btn-secondary {
-  @apply border border-gray-900 text-gray-900 font-medium py-4 px-8 hover:bg-gray-900 hover:text-white transition-all duration-300 text-sm tracking-widest uppercase;
+  @apply border border-gray-900 text-gray-900 font-medium py-3 sm:py-4 px-4 sm:px-8 hover:bg-gray-900 hover:text-white transition-all duration-300 text-xs sm:text-sm tracking-widest uppercase min-h-10 sm:min-h-12 flex items-center justify-center;
 }
 
 .btn-accent {
-  @apply bg-amber-600 text-white font-medium py-4 px-8 hover:bg-amber-700 transition-all duration-300 shadow-sm hover:shadow-md text-sm tracking-widest uppercase;
+  @apply bg-amber-600 text-white font-medium py-3 sm:py-4 px-4 sm:px-8 hover:bg-amber-700 transition-all duration-300 shadow-sm hover:shadow-md text-xs sm:text-sm tracking-widest uppercase min-h-10 sm:min-h-12 flex items-center justify-center;
 }
 
 .input-field {
-  @apply w-full px-4 py-4 border border-gray-200 focus:outline-none focus:border-amber-600 transition-all duration-200 bg-gray-50;
+  @apply w-full px-3 sm:px-4 py-2.5 sm:py-4 border border-gray-200 focus:outline-none focus:border-amber-600 transition-all duration-200 bg-gray-50 text-sm;
 }
 
 .badge {
@@ -74,11 +74,27 @@ code {
 
 /* Luxury spacing and layout */
 .luxury-section {
-  @apply py-24;
+  @apply py-12 sm:py-20 md:py-24;
 }
 
 .luxury-container {
-  @apply container mx-auto px-6;
+  @apply container mx-auto px-3 sm:px-4 md:px-6;
+}
+
+/* Mobile-first responsive utilities */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+  
+  h1 {
+    line-height: 1.2;
+  }
+  
+  .container {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
 }
 
 .badge-success {

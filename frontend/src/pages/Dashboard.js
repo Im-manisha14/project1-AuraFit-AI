@@ -58,7 +58,7 @@ const Dashboard = () => {
           className="absolute inset-0 bg-black z-10"
         />
         
-        <div className="relative z-20 container mx-auto px-3 sm:px-6 py-16 sm:py-24 lg:py-32 text-center">
+        <div className="relative z-20 container mx-auto px-3 sm:px-4 md:px-6 py-12 sm:py-16 md:py-24 lg:py-32 text-center">
           <motion.div
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -67,7 +67,7 @@ const Dashboard = () => {
             <div className="inline-block mb-4 sm:mb-6">
               <HiOutlineSparkles className="text-3xl sm:text-4xl lg:text-5xl text-amber-500 mx-auto" />
             </div>
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-bold mb-6 sm:mb-8 tracking-tight">
+            <h1 className="text-2xl sm:text-4xl lg:text-6xl font-bold mb-4 sm:mb-6 md:mb-8 tracking-tight">
               HIGH-END & CLASSY
             </h1>
           </motion.div>
@@ -76,7 +76,7 @@ const Dashboard = () => {
             initial={{ y: 30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.4 }}
-            className="text-base sm:text-lg lg:text-xl mb-8 sm:mb-12 font-light max-w-2xl mx-auto leading-relaxed px-2"
+            className="text-sm sm:text-base md:text-lg lg:text-xl mb-6 sm:mb-8 md:mb-12 font-light max-w-2xl mx-auto leading-relaxed px-2"
           >
             Experience luxury fashion with AI-powered personalized styling
           </motion.p>
@@ -85,18 +85,18 @@ const Dashboard = () => {
             initial={{ y: 30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.6 }}
-            className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-6 px-4"
+            className="flex flex-col sm:flex-row justify-center gap-3 sm:gap-4 md:gap-6 px-3 sm:px-4"
           >
             <Link 
               to="/trends" 
-              className="group border border-white text-white px-6 sm:px-8 py-3 sm:py-4 font-medium text-xs sm:text-sm tracking-widest uppercase hover:bg-white hover:text-gray-900 transition-all duration-300 flex items-center justify-center space-x-2"
+              className="group border border-white text-white px-4 sm:px-6 md:px-8 py-2.5 sm:py-3 md:py-4 font-medium text-xs sm:text-sm tracking-widest uppercase hover:bg-white hover:text-gray-900 transition-all duration-300 flex items-center justify-center space-x-2 min-h-10 sm:min-h-11"
             >
               <span>Learn More</span>
               <FiArrowRight className="group-hover:translate-x-1 transition-transform" />
             </Link>
             <Link 
               to="/recommendations" 
-              className="group bg-amber-600 text-white px-6 sm:px-8 py-3 sm:py-4 font-medium text-xs sm:text-sm tracking-widest uppercase hover:bg-amber-700 transition-all duration-300 flex items-center justify-center space-x-2"
+              className="group bg-amber-600 text-white px-4 sm:px-6 md:px-8 py-2.5 sm:py-3 md:py-4 font-medium text-xs sm:text-sm tracking-widest uppercase hover:bg-amber-700 transition-all duration-300 flex items-center justify-center space-x-2 min-h-10 sm:min-h-11"
             >
               <FiShoppingBag />
               <span>Start Now</span>

@@ -23,7 +23,7 @@ class HandSkinToneDetector:
     
     def detect_skin_from_image(self, image_data: str) -> dict:
         """
-        Detect skin tone from base64 encoded image
+        Detect skin tone from base64 encoded image with proper computer vision.
         
         Args:
             image_data: Base64 encoded image string
@@ -43,23 +43,31 @@ class HandSkinToneDetector:
             
             print(f"[HandDetector] Processing image of size: {image.shape}")
             
-            # Detect hand region with improved algorithm
+            # Check brightness - if too dark, camera not ready
+            mean_brightness = float(np.mean(image))
+            if mean_brightness < 20:
+                return {
+                    'success': False,
+                    'error': '🔦 Lighting too low. Ensure good bright lighting and try again.'
+                }
+            
+            # Detect hand region with HSV skin segmentation
             hand_mask = self._detect_hand_region(image)
             
             if hand_mask is None:
-                print(f"[HandDetector] Hand detection failed - trying fallback method")
-                # Fallback: broader center region
+                print(f"[HandDetector] HSV detection failed - trying YCrCb fallback")
+                # Fallback: YCrCb color space (more lighting-robust)
                 hand_mask = self._detect_skin_fallback(image)
                 
             if hand_mask is None:
                 return {
                     'success': False,
-                    'error': 'Camera not ready yet. Please wait 1-2 seconds for the camera to warm up, then try again.'
+                    'error': '👋 Hand not detected. Keep your hand centered in the guide frame with good lighting.'
                 }
             
             print(f"[HandDetector] Hand detected successfully")
             
-            # Extract skin color from hand region
+            # Extract skin color from detected hand region
             skin_rgb = self._extract_skin_color(image, hand_mask)
             
             # Classify skin tone
@@ -84,7 +92,7 @@ class HandSkinToneDetector:
             traceback.print_exc()
             return {
                 'success': False,
-                'error': f'Detection failed: {str(e)}'
+                'error': f'Detection error: {str(e)}'
             }
     
     def _decode_base64_image(self, image_data: str) -> np.ndarray:
@@ -102,65 +110,86 @@ class HandSkinToneDetector:
     
     def _detect_hand_region(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
-        Detect hand region using the guide-box center area.
-        The UI instructs the user to center their hand in the guide frame,
-        so we sample from that central region directly — this is reliable
-        for all skin tones and lighting conditions.
-        Falls back to skin-color contour detection if the center region
-        appears too dark (no hand present yet).
+        Detect skin region using HSV color space filtering.
+        This is the REAL skin detection that actually segments skin from non-skin.
         """
         height, width = image.shape[:2]
 
-        # Define the guide-box region (matches the overlay in the UI:
-        # horizontally 25%-75%, vertically 20%-80%)
-        x_start = int(width * 0.25)
-        x_end   = int(width * 0.75)
-        y_start = int(height * 0.20)
-        y_end   = int(height * 0.80)
+        # Check image brightness first
+        mean_brightness = float(np.mean(image))
+        print(f"[HandDetector] Overall image brightness: {mean_brightness:.1f}")
 
-        guide_region = image[y_start:y_end, x_start:x_end]
-
-        # Sanity check: if the region is too dark (average brightness < 20),
-        # the camera hasn't loaded a real frame yet — signal failure so the
-        # caller can return a "please wait" error.
-        mean_brightness = float(np.mean(guide_region))
-        print(f"[HandDetector] Guide region mean brightness: {mean_brightness:.1f}")
-
-        if mean_brightness < 20:
+        if mean_brightness < 15:
             print(f"[HandDetector] Image too dark — camera not ready yet")
             return None
 
-        # Build a mask covering the guide region
-        hand_mask = np.zeros((height, width), dtype=np.uint8)
-        hand_mask[y_start:y_end, x_start:x_end] = 255
+        # Convert BGR to HSV
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-        print(f"[HandDetector] Guide-region detection successful!")
-        return hand_mask
+        # Define skin color range in HSV - expanded to cover fair/light skin tones
+        # Fair skin: yellows + reds + oranges
+        # H: 5-30 (oranges,reds) + 150-180 (red wrap-around) 
+        # S: 25-220 (lower saturation for fair skin which tends to be less saturated)
+        # V: 60-255 (more forgiving on brightness for dim lighting)
+        lower_orange = np.array([5, 25, 60], dtype=np.uint8)
+        upper_orange = np.array([30, 220, 255], dtype=np.uint8)
+
+        lower_red = np.array([150, 25, 60], dtype=np.uint8)
+        upper_red = np.array([180, 220, 255], dtype=np.uint8)
+
+        # Create mask for skin pixels
+        mask1 = cv2.inRange(hsv, lower_orange, upper_orange)
+        mask2 = cv2.inRange(hsv, lower_red, upper_red)
+        mask = cv2.bitwise_or(mask1, mask2)
+
+        # Remove noise with morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.erode(mask, kernel, iterations=1)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+
+        # Check if skin detected
+        skin_ratio = float(np.sum(mask > 0)) / (height * width)
+        print(f"[HandDetector] Skin detection ratio: {skin_ratio:.1%}")
+
+        if skin_ratio < 0.02:
+            print(f"[HandDetector] Too little skin detected ({skin_ratio:.1%}) - using fallback")
+            return None
+
+        print(f"[HandDetector] HSV skin detection successful! ({skin_ratio:.1%} skin)")
+        return mask
     
     def _detect_skin_fallback(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
-        Fallback: use the full center half of the image.
-        Only used when the primary guide-region check returns None
-        (i.e. image is too dark / camera not ready).
+        Fallback: Use YCrCb color space (more lighting-robust than HSV).
+        Only used when HSV detection fails.
         """
-        print(f"[HandDetector] Using fallback skin detection")
+        print(f"[HandDetector] Using YCrCb fallback skin detection")
         height, width = image.shape[:2]
 
-        # Broader center region
-        x_start = int(width * 0.15)
-        x_end   = int(width * 0.85)
-        y_start = int(height * 0.10)
-        y_end   = int(height * 0.90)
+        # Convert BGR to YCrCb
+        ycrcb = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
 
-        # If still too dark, give up
-        region = image[y_start:y_end, x_start:x_end]
-        if float(np.mean(region)) < 15:
-            print(f"[HandDetector] Fallback: image still too dark")
+        # YCrCb skin detection - expanded ranges for fair/light skin in dim lighting
+        # Y (brightness): 0-255, Cr (red): 120-180, Cb (blue): 60-140
+        lower = np.array([0, 120, 60], dtype=np.uint8)
+        upper = np.array([255, 180, 140], dtype=np.uint8)
+
+        mask = cv2.inRange(ycrcb, lower, upper)
+
+        # Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.erode(mask, kernel, iterations=1)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+
+        # Check skin ratio
+        skin_ratio = float(np.sum(mask > 0)) / (height * width)
+        print(f"[HandDetector] YCrCb skin ratio: {skin_ratio:.1%}")
+
+        if skin_ratio < 0.02:
+            print(f"[HandDetector] YCrCb fallback also failed - insufficient skin detected")
             return None
 
-        mask = np.zeros((height, width), dtype=np.uint8)
-        mask[y_start:y_end, x_start:x_end] = 255
-        print(f"[HandDetector] Fallback detection successful!")
+        print(f"[HandDetector] YCrCb fallback successful! ({skin_ratio:.1%} skin)")
         return mask
     
     def detect_from_rgb(self, rgb_values: list) -> dict:
@@ -206,9 +235,15 @@ class HandSkinToneDetector:
         # Get all non-zero pixels (skin pixels)
         skin_pixels = masked_image[mask > 0]
         
+        if len(skin_pixels) == 0:
+            print(f"[HandDetector] No skin pixels found!")
+            return np.array([128, 128, 128], dtype=int)  # Default gray
+        
         # Calculate average color (BGR to RGB)
         avg_color_bgr = np.mean(skin_pixels, axis=0)
         avg_color_rgb = avg_color_bgr[::-1]  # Convert BGR to RGB
+        
+        print(f"[HandDetector] Extracted RGB: {avg_color_rgb}")
         
         return avg_color_rgb.astype(int)
     
