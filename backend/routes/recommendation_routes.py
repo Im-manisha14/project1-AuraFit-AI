@@ -8,6 +8,7 @@ bp = Blueprint('recommendation', __name__, url_prefix='/api/recommendations')
 def generate_recommendations():
     from models.user import User, UserProfile, StylePreference
     from services.recommendation_engine import RecommendationEngine
+    from extensions import db
     
     try:
         user_id_str = get_jwt_identity()
@@ -16,7 +17,7 @@ def generate_recommendations():
         data = request.get_json()
         
         # Get user data
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         profile = UserProfile.query.filter_by(user_id=user_id).first()
         preferences = StylePreference.query.filter_by(user_id=user_id).first()
         
@@ -136,7 +137,11 @@ def get_collections():
             result = []
             for o in outfits:
                 d = o.to_dict()
-                d['shopping_links'] = engine._generate_shopping_links(o, gender)
+                
+                # We no longer generate fake shopping links. 
+                # The frontend uses the actual product_url.
+                d['shopping_links'] = []
+                
                 result.append(d)
             return result
 

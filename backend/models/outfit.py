@@ -4,9 +4,11 @@ from datetime import datetime
 class Outfit(db.Model):
     __tablename__ = 'outfits'
     
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)    # Basic details
+    external_id = db.Column(db.String(100), unique=True, nullable=True) # Retailer's original product ID
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
+    category = db.Column(db.String(50)) # e.g. 'Dresses', 'Activewear'
     
     # Outfit components
     top = db.Column(db.String(100))
@@ -18,7 +20,6 @@ class Outfit(db.Model):
     gender = db.Column(db.String(20), default='unisex')  # male, female, unisex
     occasion = db.Column(db.String(50))
     season = db.Column(db.String(20))
-    category = db.Column(db.String(50))      # tuxedo, suit, gown, t-shirt, etc.
     style_type = db.Column(db.String(50))
     colors = db.Column(db.JSON)
     pattern = db.Column(db.String(50), default='solid')  # solid, floral, striped, etc.
@@ -31,21 +32,28 @@ class Outfit(db.Model):
     # Body type compatibility — list of compatible body shapes e.g. ['hourglass', 'pear', 'all']
     body_type_compatibility = db.Column(db.JSON)
 
-    # Images
-    image_url = db.Column(db.String(255))
-    
     # Metadata
     is_trending = db.Column(db.Boolean, default=False)
     trend_score = db.Column(db.Float, default=0.0)
     
+    image_url = db.Column(db.String(500))
+    price = db.Column(db.Float)
+    currency = db.Column(db.String(10), default='USD')
+    brand = db.Column(db.String(100))
+    store = db.Column(db.String(100))
+    product_url = db.Column(db.String(500))
+    in_stock = db.Column(db.Boolean, default=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def to_dict(self):
         return {
             'id': self.id,
+            'external_id': self.external_id,
             'name': self.name,
             'description': self.description,
+            'category': self.category,
             'top': self.top,
             'bottom': self.bottom,
             'shoes': self.shoes,
@@ -53,7 +61,6 @@ class Outfit(db.Model):
             'gender': self.gender,
             'occasion': self.occasion,
             'season': self.season,
-            'category': self.category,
             'style_type': self.style_type,
             'colors': self.colors,
             'pattern': self.pattern,
@@ -61,9 +68,15 @@ class Outfit(db.Model):
             'fabric_types': self.fabric_types,
             'comfort_score': self.comfort_score,
             'body_type_compatibility': self.body_type_compatibility,
+            'image_url': self.image_url,
             'is_trending': self.is_trending,
             'trend_score': self.trend_score,
-            'image_url': self.image_url
+            'price': self.price,
+            'currency': self.currency,
+            'brand': self.brand,
+            'store': self.store,
+            'product_url': self.product_url,
+            'in_stock': self.in_stock
         }
 
 class UserFeedback(db.Model):

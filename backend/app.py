@@ -288,7 +288,14 @@ def _seed_sample_outfits():
         ),
     ]
 
-    for outfit in outfits:
+    for i, outfit in enumerate(outfits):
+        # Inject Exact Product Identity Fields
+        outfit.price = 49.99 + (i * 5)
+        outfit.brand = 'AuraFit Official'
+        outfit.store = 'AuraFit'
+        outfit.product_url = f'https://aurafit.store/product/{100 + i}'
+        outfit.in_stock = True
+        
         db.session.add(outfit)
 
     try:

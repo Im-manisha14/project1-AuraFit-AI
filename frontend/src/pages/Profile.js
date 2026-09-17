@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { userAPI } from '../services/api';
-import axios from 'axios';
+import api, { userAPI } from '../services/api';
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -25,10 +24,26 @@ const Profile = () => {
   const [manualColor, setManualColor] = useState('#B89685'); // Default skin color
   const [detecting, setDetecting] = useState(false);
   const [detectionResult, setDetectionResult] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
 
   useEffect(() => {
     loadProfileData();
   }, []);
+
+  useEffect(() => {
+    if (showCamera) {
+      const timer = setTimeout(() => {
+        startCamera();
+      }, 50);
+      return () => {
+        clearTimeout(timer);
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
+      };
+    }
+  }, [showCamera]);
 
   const loadProfileData = async () => {
     try {
@@ -121,10 +136,9 @@ const Profile = () => {
         };
       }
       
-      setShowCamera(true);
       setMessage('📸 Position the back of your hand facing the camera in good lighting');
     } catch (error) {
-      setMessage('❌ Camera access denied. Please enable camera permissions.');
+      setMessage('❌ Camera access denied or unavailable. Please check permissions.');
       console.error('Camera error:', error);
     }
   };
@@ -132,9 +146,17 @@ const Profile = () => {
   const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
     setShowCamera(false);
     setDetectionResult(null);
+    setCapturedImage(null);
+  };
+  
+  const retakePhoto = () => {
+    setDetectionResult(null);
+    setCapturedImage(null);
+    startCamera();
   };
 
   const detectFromManualColor = async () => {
@@ -148,16 +170,9 @@ const Profile = () => {
       const g = parseInt(hex.substr(2, 2), 16);
       const b = parseInt(hex.substr(4, 2), 16);
 
-      const token = localStorage.getItem('access_token');
-      const response = await axios.post(
-        'http://localhost:5000/api/ai/detect-skin-tone',
-        { rgb: [r, g, b] },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
+      const response = await api.post(
+        '/ai/detect-skin-tone',
+        { rgb: [r, g, b] }
       );
 
       if (response.data.success) {
@@ -221,40 +236,31 @@ const Profile = () => {
       
       // Convert to base64 with high quality
       const imageData = canvas.toDataURL('image/jpeg', 0.98);
+      setCapturedImage(imageData);
       
       console.log('Cropped image size:', cropWidth, 'x', cropHeight, 'Original:', videoWidth, 'x', videoHeight);
       
+      // Stop the live feed since we captured
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
       // Send to backend
-      const token = localStorage.getItem('access_token');
-      const response = await axios.post(
-        'http://localhost:5000/api/ai/detect-skin-tone',
-        { image: imageData },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
+      const response = await api.post(
+        '/ai/detect-skin-tone',
+        { image: imageData }
       );
 
       if (response.data.success) {
         const result = response.data;
         
-        // Update profile with detected skin tone
-        setProfile({
-          ...profile,
-          skin_tone: result.skin_tone,
-        });
-        
         setDetectionResult(result);
-        setMessage(`✅ Skin tone detected: ${result.skin_tone}!`);
-        
-        // Keep camera open for 3 seconds to show detected color, then close
-        setTimeout(() => {
-          stopCamera();
-        }, 3000);
+        setMessage(`✅ Skin tone detected!`);
       } else {
-        setMessage(`❌ ${response.data.error}`);
+        setMessage(`❌ ${response.data.error || response.data.message}`);
+        setCapturedImage(null); // Clear on fail so they can see camera
+        startCamera(); // restart camera
       }
     } catch (error) {
       console.error('Detection error:', error);
@@ -269,8 +275,20 @@ const Profile = () => {
       }
       
       setMessage(`❌ ${errorMsg}`);
+      setCapturedImage(null);
+      startCamera(); // restart camera on error
     } finally {
       setDetecting(false);
+    }
+  };
+  
+  const acceptDetection = () => {
+    if (detectionResult) {
+      setProfile({
+        ...profile,
+        skin_tone: detectionResult.skin_tone,
+      });
+      stopCamera();
     }
   };
 
@@ -435,108 +453,94 @@ const Profile = () => {
               <li>✓ Ensure your hand fills at least 30% of the frame</li>
             </ul>
             
-            <div className="relative max-w-xs sm:max-w-sm lg:max-w-md mx-auto">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full rounded-lg border-2 sm:border-4 border-purple-400 shadow-md bg-black"
-                style={{ minHeight: '200px', maxHeight: '400px' }}
-              />
-              
-              {/* Display detected skin tone on camera if available */}
-              {detectionResult && detectionResult.rgb_value && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-lg">
-                  <div className="text-center">
-                    <div
-                      className="w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 rounded-full mb-3 sm:mb-4 shadow-2xl border-4 border-white animate-pulse"
-                      style={{ backgroundColor: `rgb(${detectionResult.rgb_value.join(',')})` }}
-                    />
-                    <div className="bg-black bg-opacity-80 px-3 sm:px-4 py-2 sm:py-3 rounded-lg">
-                      <p className="text-white font-bold text-lg sm:text-xl lg:text-2xl">
-                        {detectionResult.skin_tone}
-                      </p>
-                      <p className="text-gray-300 text-xs sm:text-sm mt-1">
-                        Brightness: {detectionResult.brightness}
-                      </p>
+            <div className="relative max-w-xs sm:max-w-sm lg:max-w-md mx-auto aspect-video bg-black rounded-lg overflow-hidden border-2 sm:border-4 border-purple-400 shadow-md">
+              {!capturedImage ? (
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="absolute inset-0 w-full h-full object-cover"
+                    style={{ transform: 'scaleX(-1)' }}
+                  />
+                  {/* Transparent dashed guide */}
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className="w-[50%] h-[60%] border-2 border-dashed border-white rounded-lg flex items-end justify-center pb-2 bg-black bg-opacity-0 shadow-[0_0_0_9999px_rgba(0,0,0,0.4)]">
+                      <span className="text-white text-xs sm:text-sm font-semibold bg-black bg-opacity-50 px-2 py-1 rounded">
+                        HAND HERE
+                      </span>
                     </div>
                   </div>
+                </>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900">
+                  <img src={capturedImage} alt="Captured hand" className="h-[60%] w-auto rounded-lg object-cover border-2 border-purple-500 mb-2 shadow-lg" />
+                  {detecting && <p className="text-white text-sm animate-pulse">Analyzing...</p>}
                 </div>
               )}
-              
-              {/* Enhanced hand guide overlay (only show when not detected) */}
-              {!detectionResult && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-40 h-48 sm:w-48 sm:h-56 lg:w-56 lg:h-64 border-2 sm:border-4 border-dashed border-white rounded-xl flex items-center justify-center bg-black bg-opacity-20">
-                  <div className="text-center">
-                    <div className="text-3xl sm:text-5xl lg:text-6xl mb-1 sm:mb-2">🤚</div>
-                    <span className="text-white text-xs sm:text-sm font-semibold bg-black bg-opacity-60 px-2 sm:px-3 py-1 sm:py-2 rounded-lg">
-                      Center back of hand here
-                    </span>
-                  </div>
-                </div>
-              </div>
-              )}
+            </div>
 
             <canvas ref={canvasRef} className="hidden" />
 
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-3 sm:mt-4 justify-center">
-              <button
-                type="button"
-                onClick={captureAndDetect}
-                disabled={detecting || detectionResult}
-                className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 font-medium text-sm sm:text-base"
-              >
-                {detecting ? '🔍 Analyzing...' : detectionResult ? '✅ Complete' : '✨ Detect Skin Tone'}
-              </button>
-              <button
-                type="button"
-                onClick={stopCamera}
-                className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
-              >
-                Cancel
-              </button>
+              {!detectionResult ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={captureAndDetect}
+                    disabled={detecting}
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 font-medium text-sm sm:text-base"
+                  >
+                    {detecting ? '🔍 Analyzing...' : '✨ Detect Skin Tone'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    disabled={detecting}
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={acceptDetection}
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium text-sm sm:text-base"
+                  >
+                    Use This Skin Tone
+                  </button>
+                  <button
+                    type="button"
+                    onClick={retakePhoto}
+                    className="w-full sm:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-medium text-sm sm:text-base"
+                  >
+                    Retake
+                  </button>
+                </>
+              )}
             </div>
 
-            {/* Detection Result */}
+            {/* Detection Result Info Box */}
             {detectionResult && (
-              <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-white rounded-lg border border-green-200">
-                <h4 className="font-bold text-green-700 mb-2 text-sm sm:text-base">
-                  ✅ Detection Successful!
+              <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-white rounded-lg border border-purple-200 shadow-sm">
+                <h4 className="font-bold text-purple-700 mb-2 text-center text-sm sm:text-base">
+                  ✓ Skin Tone Detected
                 </h4>
-                <div className="space-y-2 text-xs sm:text-sm">
-                  <div className="flex items-center gap-3">
-                    <strong>Skin Tone:</strong>
-                    {detectionResult.rgb_value && (
-                      <div
-                        className="w-8 h-8 rounded border-2 border-gray-300 shadow-sm flex-shrink-0"
-                        style={{ backgroundColor: `rgb(${detectionResult.rgb_value.join(',')})` }}
-                        title={`rgb(${detectionResult.rgb_value.join(', ')})`}
-                      />
-                    )}
-                    <span>{detectionResult.skin_tone}</span>
-                  </div>
-                  <p>
-                    <strong>Brightness:</strong> {detectionResult.brightness}
+                <div className="flex flex-col items-center justify-center space-y-3">
+                  {detectionResult.rgb_value && (
+                    <div
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 border-white shadow-md"
+                      style={{ backgroundColor: `rgb(${detectionResult.rgb_value.join(',')})` }}
+                      title={`rgb(${detectionResult.rgb_value.join(', ')})`}
+                    />
+                  )}
+                  <span className="text-xl font-bold text-gray-800">{detectionResult.skin_tone}</span>
+                  <p className="text-xs sm:text-sm text-gray-500 text-center max-w-xs">
+                    Your detected skin tone will be used for personalized outfit recommendations.
                   </p>
-                  <div>
-                    <strong>Recommended Colors:</strong>
-                    <div className="flex flex-wrap gap-1 sm:gap-2 mt-1">
-                      {detectionResult.recommended_colors?.map((color, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs flex items-center gap-1"
-                        >
-                          <div
-                            className="w-3 h-3 rounded-full border border-purple-300 flex-shrink-0"
-                            style={{ backgroundColor: COLOR_MAP[color.toLowerCase()] || color }}
-                          />
-                          {color}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}

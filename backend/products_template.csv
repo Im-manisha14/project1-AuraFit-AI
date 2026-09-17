@@ -1,0 +1,3 @@
+external_id,name,brand,category,gender,colors,image_url,price,currency,retailer,product_url,in_stock,occasion,season,style,body_types
+PLACEHOLDER_1,Example Silk Dress,AuraFit Mock,Dresses,female,"Wine Red,Cream",https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=800,99.99,USD,Mock Store,https://aurafit.store/product/mock1,true,party,all,elegant,"hourglass,pear"
+PLACEHOLDER_2,Example Men's Blazer,AuraFit Mock,Jackets,male,"Navy,Gold",https://images.unsplash.com/photo-1593030761757-71fae45fa0e7?q=80&w=800,149.99,USD,Mock Store,https://aurafit.store/product/mock2,false,formal,winter,formal,"rectangle,inverted_triangle"

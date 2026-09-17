@@ -17,16 +17,7 @@ const COLLECTION_META = {
   party:      { title: 'Party & Date Night',       icon: '🎉' },
 };
 
-const SHOP_LABELS = {
-  myntra:   { label: 'Myntra',    color: '#FF3F6C' },
-  flipkart: { label: 'Flipkart', color: '#2874F0' },
-  ajio:     { label: 'Ajio',     color: '#E31E25' },
-  meesho:   { label: 'Meesho',   color: '#9B2D8E' },
-  nykaa:    { label: 'Nykaa',    color: '#FC2779' },
-  amazon:   { label: 'Amazon',   color: '#FF9900' },
-  hm:       { label: 'H&M',      color: '#E50010' },
-  zara:     { label: 'Zara',     color: '#111111' },
-};
+
 
 const GENDER_BADGE = {
   female: { label: 'Women', bg: '#FFF0F6', color: '#C2185B' },
@@ -46,6 +37,12 @@ const GenderBadge = ({ gender }) => {
     </span>
   );
 };
+const checkValidUrl = (url) => {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  if (lower.includes('aurafit.store') || lower.includes('example.com') || lower.includes('placeholder')) return false;
+  return true;
+};
 
 const Recommendations = () => {
   const navigate = useNavigate();
@@ -63,7 +60,7 @@ const Recommendations = () => {
   });
   const [collections, setCollections] = useState({});
   const [collectionsLoading, setCollectionsLoading] = useState(false);
-  const [shopOpen, setShopOpen] = useState(null);
+
 
   useEffect(() => {
     checkProfileStatus();
@@ -443,57 +440,54 @@ const Recommendations = () => {
                       </div>
                     )}
 
-                    {/* Action Button */}
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => navigate(`/outfit/${rec.outfit?.id}`)}
-                      className="w-full bg-gray-900 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-800 transition-colors flex items-center justify-center space-x-2 mb-2"
-                    >
-                      <span>View Details</span>
-                      <FiStar />
-                    </motion.button>
+                    {/* Product Details (Price & Brand) */}
+                    <div className="flex justify-between items-center mb-4">
+                      {rec.outfit?.brand && (
+                        <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">
+                          {rec.outfit.brand}
+                        </span>
+                      )}
+                      {rec.outfit?.price ? (
+                        <span className="text-lg font-bold text-amber-600">
+                          ${rec.outfit.price.toFixed(2)}
+                        </span>
+                      ) : null}
+                    </div>
 
-                    {/* Shop Links */}
-                    {rec.outfit?.shopping_links && Object.keys(rec.outfit.shopping_links).length > 0 && (
-                      <div>
-                        <motion.button
+                    {/* Action Buttons */}
+                    <div className="flex flex-col gap-2 mb-2">
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigate(`/outfit/${rec.outfit?.id}`)}
+                        className="w-full bg-white border border-gray-900 text-gray-900 py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2"
+                      >
+                        <span>View Details</span>
+                        <FiStar />
+                      </motion.button>
+                      
+                      {(!rec.outfit?.in_stock) ? (
+                        <button disabled className="w-full bg-gray-200 text-gray-500 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed">
+                          <span>Out of Stock</span>
+                        </button>
+                      ) : (!checkValidUrl(rec.outfit?.product_url)) ? (
+                        <button disabled className="w-full bg-gray-100 text-gray-500 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed border border-gray-200">
+                          <span>Shopping Link Unavailable</span>
+                        </button>
+                      ) : (
+                        <motion.a
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
-                          onClick={() => setShopOpen(shopOpen === `rec-${index}` ? null : `rec-${index}`)}
-                          className="w-full border border-amber-600 text-amber-700 py-2.5 font-medium text-xs tracking-widest uppercase hover:bg-amber-50 transition-colors flex items-center justify-center gap-2"
+                          href={rec.outfit.product_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full bg-amber-600 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-amber-700 transition-colors flex items-center justify-center space-x-2"
                         >
                           <FiShoppingBag />
-                          <span>{shopOpen === `rec-${index}` ? 'Hide Links' : 'Shop Now'}</span>
-                        </motion.button>
-                        {shopOpen === `rec-${index}` && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="grid grid-cols-4 gap-1 mt-2"
-                          >
-                            {Object.entries(rec.outfit.shopping_links).map(([platform, url]) => {
-                              const s = SHOP_LABELS[platform];
-                              if (!s) return null;
-                              return (
-                                <a
-                                  key={platform}
-                                  href={url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
-                                  style={{ borderColor: s.color, color: s.color }}
-                                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
-                                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
-                                >
-                                  {s.label}
-                                </a>
-                              );
-                            })}
-                          </motion.div>
-                        )}
-                      </div>
-                    )}
+                          <span>Shop Exact Item</span>
+                        </motion.a>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               ))}
@@ -632,45 +626,38 @@ const Recommendations = () => {
                               </div>
                             )}
 
-                            {/* Shop Button + Inline Links */}
-                            {outfit.shopping_links && Object.keys(outfit.shopping_links).length > 0 && (
-                              <div>
-                                <button
-                                  onClick={() => setShopOpen(
-                                    shopOpen === `${key}-${outfit.id}` ? null : `${key}-${outfit.id}`
-                                  )}
-                                  className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
-                                >
-                                  <FiShoppingBag className="text-xs" />
-                                  <span>{shopOpen === `${key}-${outfit.id}` ? 'Hide' : 'Shop Now'}</span>
-                                </button>
-                                {shopOpen === `${key}-${outfit.id}` && (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: -4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="grid grid-cols-4 gap-1 mt-2"
-                                  >
-                                    {Object.entries(outfit.shopping_links).map(([platform, url]) => {
-                                      const s = SHOP_LABELS[platform];
-                                      if (!s) return null;
-                                      return (
-                                        <a
-                                          key={platform}
-                                          href={url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
-                                          style={{ borderColor: s.color, color: s.color }}
-                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
-                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
-                                        >
-                                          {s.label}
-                                        </a>
-                                      );
-                                    })}
-                                  </motion.div>
-                                )}
-                              </div>
+                            {/* Product Details & Shop Button */}
+                            <div className="flex justify-between items-center mb-3">
+                              {outfit.brand && (
+                                <span className="text-xs font-bold text-gray-800 uppercase">
+                                  {outfit.brand}
+                                </span>
+                              )}
+                              {outfit.price && (
+                                <span className="text-sm font-bold text-amber-600">
+                                  ${outfit.price.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+
+                            {(!outfit.in_stock) ? (
+                              <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-200 text-gray-500 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed">
+                                <span>Out of Stock</span>
+                              </button>
+                            ) : (!checkValidUrl(outfit.product_url)) ? (
+                              <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-100 text-gray-500 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed border border-gray-200">
+                                <span>Shopping Link Unavailable</span>
+                              </button>
+                            ) : (
+                              <a
+                                href={outfit.product_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2.5 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
+                              >
+                                <FiShoppingBag className="text-xs" />
+                                <span>Shop Exact Item</span>
+                              </a>
                             )}
                           </div>
                         </motion.div>

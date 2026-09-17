@@ -42,9 +42,10 @@ def get_outfits():
 @jwt_required()
 def get_outfit(outfit_id):
     from models.outfit import Outfit
+    from extensions import db
     
     try:
-        outfit = Outfit.query.get(outfit_id)
+        outfit = db.session.get(Outfit, outfit_id)
         
         if not outfit:
             return jsonify({'error': 'Outfit not found'}), 404
@@ -66,7 +67,7 @@ def submit_feedback(outfit_id):
         user_id = int(user_id_str)
         data = request.get_json()
         
-        outfit = Outfit.query.get(outfit_id)
+        outfit = db.session.get(Outfit, outfit_id)
         if not outfit:
             return jsonify({'error': 'Outfit not found'}), 404
         

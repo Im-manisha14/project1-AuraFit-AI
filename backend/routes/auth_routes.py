@@ -98,6 +98,7 @@ def refresh():
 @jwt_required()
 def get_current_user():
     from models.user import User
+    from extensions import db
     
     try:
         user_id = get_jwt_identity()
@@ -108,7 +109,7 @@ def get_current_user():
             return jsonify({'error': 'Invalid token'}), 401
         
         # Convert string identity back to int for database query
-        user = User.query.get(int(user_id))
+        user = db.session.get(User, int(user_id))
         
         if not user:
             print(f"[AUTH /me] ERROR: User {user_id} not found in database")

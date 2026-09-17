@@ -1,0 +1,6 @@
+external_id,name,brand,category,gender,colors,image_url,price,currency,retailer,product_url,in_stock,occasion,season,style,body_types
+VALID_1,Real H&M Dress,H&M,Dresses,female,"Red",https://example.com/hm_dress.jpg,29.99,USD,H&M,https://www.hm.com/en_us/productpage.0987654321.html,true,casual,summer,feminine,"hourglass"
+VALID_1,Real H&M Dress (Duplicate),H&M,Dresses,female,"Red",https://example.com/hm_dress.jpg,19.99,USD,H&M,https://www.hm.com/en_us/productpage.0987654321.html,true,casual,summer,feminine,"hourglass"
+INVALID_URL,Fake Store Item,Fake,Dresses,female,"Blue",https://example.com/fake.jpg,15.00,USD,FakeStore,https://aurafit.store/product/fake,true,casual,all,casual,""
+MISSING_PRICE,No Price Item,Fake,Shirts,male,"Black",https://example.com/no_price.jpg,,USD,FakeStore,https://www.asos.com/product/123,true,casual,all,casual,""
+OUT_OF_STOCK_1,Zara Blazer,Zara,Jackets,male,"Navy",https://example.com/zara.jpg,89.90,USD,Zara,https://www.zara.com/us/en/blazer-p012345.html,false,work,all,formal,""

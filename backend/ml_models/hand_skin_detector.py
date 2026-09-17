@@ -48,7 +48,7 @@ class HandSkinToneDetector:
             if mean_brightness < 20:
                 return {
                     'success': False,
-                    'error': '🔦 Lighting too low. Ensure good bright lighting and try again.'
+                    'error': 'Lighting too low. Ensure good bright lighting and try again.'
                 }
             
             # Detect hand region with HSV skin segmentation
@@ -62,13 +62,20 @@ class HandSkinToneDetector:
             if hand_mask is None:
                 return {
                     'success': False,
-                    'error': '👋 Hand not detected. Keep your hand centered in the guide frame with good lighting.'
+                    'error': 'Hand not detected. Keep your hand centered in the guide frame with good lighting.'
                 }
             
             print(f"[HandDetector] Hand detected successfully")
             
             # Extract skin color from detected hand region
             skin_rgb = self._extract_skin_color(image, hand_mask)
+            
+            # If the median returned default gray (128,128,128), we didn't find enough skin
+            if np.array_equal(skin_rgb, np.array([128, 128, 128])):
+                return {
+                    'success': False,
+                    'error': 'Please place the back of your hand inside the guide and try again.'
+                }
             
             # Classify skin tone
             skin_tone, brightness = self._classify_skin_tone(skin_rgb)
@@ -235,13 +242,22 @@ class HandSkinToneDetector:
         # Get all non-zero pixels (skin pixels)
         skin_pixels = masked_image[mask > 0]
         
-        if len(skin_pixels) == 0:
-            print(f"[HandDetector] No skin pixels found!")
+        if len(skin_pixels) < 100:  # Require at least 100 valid pixels
+            print(f"[HandDetector] Not enough valid skin pixels found! ({len(skin_pixels)})")
             return np.array([128, 128, 128], dtype=int)  # Default gray
+            
+        # Filter out extremely dark or bright pixels that made it through the mask
+        # (Luminance approximation)
+        luminance = 0.299 * skin_pixels[:, 2] + 0.587 * skin_pixels[:, 1] + 0.114 * skin_pixels[:, 0]
+        valid_pixels = skin_pixels[(luminance > 30) & (luminance < 240)]
         
-        # Calculate average color (BGR to RGB)
-        avg_color_bgr = np.mean(skin_pixels, axis=0)
-        avg_color_rgb = avg_color_bgr[::-1]  # Convert BGR to RGB
+        if len(valid_pixels) < 100:
+            print(f"[HandDetector] Not enough well-lit skin pixels found after brightness filter!")
+            return np.array([128, 128, 128], dtype=int)
+        
+        # Calculate median color (robust against outliers/background noise)
+        median_color_bgr = np.median(valid_pixels, axis=0)
+        avg_color_rgb = median_color_bgr[::-1]  # Convert BGR to RGB
         
         print(f"[HandDetector] Extracted RGB: {avg_color_rgb}")
         

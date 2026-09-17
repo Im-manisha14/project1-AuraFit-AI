@@ -47,6 +47,29 @@ SKIN_TONE_COMPATIBLE_COLORS = {
 }
 
 # ---------------------------------------------------------------------------
+# Color Normalization
+# ---------------------------------------------------------------------------
+COLOR_NORMALIZATION = {
+    'wine red': 'burgundy',
+    'maroon': 'burgundy',
+    'dark red': 'burgundy',
+    'navy blue': 'navy',
+    'dark blue': 'navy',
+    'light blue': 'soft blue',
+    'hot pink': 'magenta',
+    'dark grey': 'charcoal',
+    'dark gray': 'charcoal',
+    'mustard': 'mustard yellow',
+    'sandy tan': 'tan',
+    'earth tones': 'brown',
+}
+
+def _normalize_color(color: str) -> str:
+    """Normalize inconsistent product colors to standard base colors."""
+    c = color.lower().strip()
+    return COLOR_NORMALIZATION.get(c, c)
+
+# ---------------------------------------------------------------------------
 # Body type / shape â†’ compatible style_type keywords
 # ---------------------------------------------------------------------------
 FEMALE_BODY_TYPE_STYLES = {
@@ -84,11 +107,12 @@ class RecommendationEngine:
 
     def __init__(self):
         self.weights = {
-            'style_match': 0.40,   # skin-tone color harmony
-            'body_type':   0.25,   # body type / shape compatibility
-            'comfort':     0.20,   # occasion suitability
-            'trend':       0.10,   # season suitability
-            'feedback':    0.05,   # collaborative filtering signal
+            'style_match':    0.35,   # skin-tone color harmony
+            'body_type':      0.20,   # body type / shape compatibility
+            'comfort':        0.20,   # occasion suitability
+            'purchasability': 0.10,   # penalize out of stock / no real URL
+            'trend':          0.10,   # season suitability
+            'feedback':       0.05,   # collaborative filtering signal
         }
 
     # -----------------------------------------------------------------------
@@ -148,8 +172,6 @@ class RecommendationEngine:
             )
             overall = self._calculate_overall_score(scores)
             outfit_dict = outfit.to_dict()
-            viewer_gender = (profile.gender or '').lower() if profile else ''
-            outfit_dict['shopping_links'] = self._generate_shopping_links(outfit, viewer_gender)
             scored.append({
                 'outfit':        outfit_dict,
                 'scores':        scores,
@@ -284,10 +306,10 @@ class RecommendationEngine:
                 # Keep: no color info available, cannot disqualify
                 filtered.append(outfit)
                 continue
-            outfit_colors_lower = [c.lower() for c in outfit.colors]
+            outfit_colors_normalized = [_normalize_color(c) for c in outfit.colors]
             is_compatible = any(
                 any(comp in oc or oc in comp for comp in compatible)
-                for oc in outfit_colors_lower
+                for oc in outfit_colors_normalized
             )
             if is_compatible:
                 filtered.append(outfit)
@@ -309,8 +331,9 @@ class RecommendationEngine:
             'style_match': self._calculate_style_match_score(outfit, preferences, skin_tone),
             'body_type':   self._calculate_body_type_score(outfit, profile),
             'comfort':     self._calculate_occasion_score(outfit, occasion),
-            'trend':       self._calculate_season_score(outfit, season),
-            'feedback':    collab_map.get(outfit.id, 0.5),
+            'trend':          self._calculate_season_score(outfit, season),
+            'purchasability': self._calculate_purchasability_score(outfit),
+            'feedback':       collab_map.get(outfit.id, 0.5),
         }
 
     def _calculate_style_match_score(self, outfit, preferences, skin_tone: str = None) -> float:
@@ -325,10 +348,10 @@ class RecommendationEngine:
             tone_key = skin_tone.lower()
             compatible = SKIN_TONE_COMPATIBLE_COLORS.get(tone_key, [])
             if compatible:
-                outfit_colors_lower = [c.lower() for c in outfit.colors]
+                outfit_colors_normalized = [_normalize_color(c) for c in outfit.colors]
                 match = any(
                     any(comp in oc or oc in comp for comp in compatible)
-                    for oc in outfit_colors_lower
+                    for oc in outfit_colors_normalized
                 )
                 # Strong signal: match=1.0, mismatch=0.10
                 scores.append(1.0 if match else 0.10)
@@ -408,50 +431,24 @@ class RecommendationEngine:
         total = sum(scores[k] * self.weights.get(k, 0.0) for k in scores)
         return round(total, 2)
 
-    # -----------------------------------------------------------------------
-    # Shopping links
-    # -----------------------------------------------------------------------
+    def _calculate_purchasability_score(self, outfit) -> float:
+        """
+        Purchasability (10 % weight).
+          1.0  Real product_url and in_stock == True
+          0.30 No product URL or placeholder URL (can't be bought)
+          0.00 Out of stock
+        """
+        if not outfit.in_stock:
+            return 0.0
+            
+        url = outfit.product_url
+        if not url:
+            return 0.30
+        
+        url_lower = url.lower()
+        if 'aurafit.store' in url_lower or 'example.com' in url_lower or 'placeholder' in url_lower:
+            return 0.30
+            
+        return 1.0
 
-    def _generate_shopping_links(self, outfit, viewer_gender: str = '') -> Dict[str, str]:
-        """Return gender-aware fashion-platform search URLs for the outfit.
-        Prepends 'women's' or 'men's' so every platform returns the correct
-        gender category. Skips prefix if the outfit name already contains it."""
-        outfit_gender = (outfit.gender or '').lower()
-        name_lower = (outfit.name or '').lower()
-
-        # Resolve which gender label to use for the search prefix
-        if outfit_gender == 'female':
-            gender_label = "women's"
-        elif outfit_gender == 'male':
-            gender_label = "men's"
-        elif viewer_gender == 'female':
-            gender_label = "women's"
-        elif viewer_gender == 'male':
-            gender_label = "men's"
-        else:
-            gender_label = ''
-
-        # Build a short, clean search term: gender + category (2-3 words max)
-        parts = []
-        if gender_label:
-            parts.append(gender_label)
-        # Use category if available (tuxedo, gown, etc.), else fall back to outfit name
-        if getattr(outfit, 'category', None):
-            parts.append(outfit.category)
-        elif outfit.name:
-            # Take first 3 words of the name only
-            parts.extend(outfit.name.split()[:3])
-
-        search_term = ' '.join(parts) if parts else 'fashion outfit'
-        q = urllib.parse.quote_plus(search_term)
-
-        return {
-            'myntra':   f'https://www.myntra.com/search?rawQuery={q}',
-            'flipkart': f'https://www.flipkart.com/search?q={q}',
-            'ajio':     f'https://www.ajio.com/search/?text={q}',
-            'meesho':   f'https://www.meesho.com/search?q={q}',
-            'nykaa':    f'https://www.nykaa.com/search/result/?q={q}&root=search',
-            'amazon':   f'https://www.amazon.in/s?k={q}&i=apparel',
-            'hm':       f'https://www2.hm.com/en_in/search-results.html?q={q}',
-            'zara':     f'https://www.zara.com/in/en/search?searchTerm={q}',
-        }
+    # Shopping links removed - UI now uses exact database product_url
