@@ -110,6 +110,7 @@ export const recommendationAPI = {
   getHistory: (params) => api.get('/recommendations/history', { params }),
   getRecommendation: (id) => api.get(`/recommendations/${id}`),
   getCollections: (params) => api.get('/recommendations/collections', { params }),
+  getSimilar: (id) => api.get(`/recommendations/similar/${id}`),
 };
 
 export default api;

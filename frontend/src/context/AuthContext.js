@@ -13,6 +13,7 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

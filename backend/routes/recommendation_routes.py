@@ -137,11 +137,8 @@ def get_collections():
             result = []
             for o in outfits:
                 d = o.to_dict()
-                
-                # We no longer generate fake shopping links. 
-                # The frontend uses the actual product_url.
-                d['shopping_links'] = []
-                
+                # Restore original shopping links behavior - real search URLs on Indian fashion platforms
+                d['shopping_links'] = engine._generate_shopping_links(o, gender)
                 result.append(d)
             return result
 
@@ -349,6 +346,52 @@ def get_recommendation(recommendation_id):
             return jsonify({'error': 'Recommendation not found'}), 404
         
         return jsonify({'recommendation': recommendation.to_dict()}), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/similar/<int:outfit_id>', methods=['GET'])
+@jwt_required()
+def get_similar(outfit_id):
+    from models.outfit import Outfit
+    from models.user import UserProfile, StylePreference
+    from services.shopping_service import SerpApiShoppingService
+    from extensions import db
+    
+    try:
+        user_id_str = get_jwt_identity()
+        user_id = int(user_id_str)
+        
+        main_outfit = db.session.get(Outfit, outfit_id)
+        if not main_outfit:
+            return jsonify({'error': 'Outfit not found'}), 404
+            
+        profile = UserProfile.query.filter_by(user_id=user_id).first()
+        preferences = StylePreference.query.filter_by(user_id=user_id).first()
+        
+        shopping_service = SerpApiShoppingService()
+        compatible_colors = main_outfit.colors if main_outfit.colors else []
+        occasion = main_outfit.occasion or 'casual'
+        
+        # Fetch similar items from shopping API
+        similar_outfits = shopping_service.fetch_recommendations(
+            profile, 
+            preferences, 
+            occasion, 
+            compatible_colors
+        )
+        
+        # Filter out the main outfit and mock ones
+        valid_similar = []
+        for o in similar_outfits:
+            if o.id == main_outfit.id or o.external_id == main_outfit.external_id:
+                continue
+                
+            url = (o.product_url or '').lower()
+            if url and (url.startswith('http://') or url.startswith('https://')) and not any(p in url for p in ['aurafit.store', 'example.com', 'localhost', '127.0.0', 'unsplash', 'placeholder']):
+                valid_similar.append(o.to_dict())
+                
+        return jsonify({'similar': valid_similar[:4]}), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

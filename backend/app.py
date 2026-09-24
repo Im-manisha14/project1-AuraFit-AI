@@ -288,14 +288,36 @@ def _seed_sample_outfits():
         ),
     ]
 
+    import hashlib
+
+    OCCASION_PRICE_INR = {
+        'formal': (3500, 8000), 'party': (2000, 5500), 'work': (1800, 4500),
+        'date': (1500, 3500), 'casual': (799, 2200), 'gym': (599, 1499),
+    }
+    STYLE_MULT = {
+        'black-tie': 1.8, 'formal': 1.5, 'elegant': 1.4, 'glam': 1.3,
+        'power-dressing': 1.3, 'feminine': 1.1, 'minimalist': 1.0,
+        'bohemian': 1.0, 'smart-casual': 0.95, 'casual': 0.9,
+        'sporty': 0.85, 'streetwear': 0.9, 'vintage': 1.0, 'resort': 1.1,
+    }
+
     for i, outfit in enumerate(outfits):
-        # Inject Exact Product Identity Fields
-        outfit.price = 49.99 + (i * 5)
+        occasion = (outfit.occasion or 'casual').lower()
+        style    = (outfit.style_type or 'casual').lower()
+        low, high = OCCASION_PRICE_INR.get(occasion, (999, 2499))
+        mult = STYLE_MULT.get(style, 1.0)
+        seed = int(hashlib.md5(f"{i}{outfit.name}".encode()).hexdigest(), 16)
+        span = max(int(high * mult) - int(low * mult), 1)
+        raw  = int(low * mult) + (seed % span)
+        price = max(int(low * mult), min((raw // 100) * 100 + 99, int(high * mult)))
+
+        outfit.price = float(price)
+        outfit.currency = 'INR'
         outfit.brand = 'AuraFit Official'
         outfit.store = 'AuraFit'
         outfit.product_url = f'https://aurafit.store/product/{100 + i}'
         outfit.in_stock = True
-        
+
         db.session.add(outfit)
 
     try:

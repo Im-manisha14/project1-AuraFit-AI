@@ -130,6 +130,20 @@ class RecommendationEngine:
     ) -> List[Dict]:
         """Generate personalized outfit recommendations using hybrid filtering."""
         from models.outfit import Outfit, Recommendation
+        
+        # Step 0 -- Fetch live data from Shopping APIs
+        from services.shopping_service import SerpApiShoppingService
+        shopping_service = SerpApiShoppingService()
+        
+        # Determine compatible colors to pass to search
+        compatible_colors = []
+        skin_tone = getattr(profile, 'skin_tone', None) if profile else None
+        if skin_tone:
+            from services.recommendation_engine import SKIN_TONE_COMPATIBLE_COLORS
+            compatible_colors = SKIN_TONE_COMPATIBLE_COLORS.get(skin_tone.lower(), [])
+            
+        # This will fetch, normalize, and store/update products in the DB
+        shopping_service.fetch_recommendations(profile, preferences, occasion, compatible_colors)
 
         # Step 1 -- Query with DB-level gender + occasion filters.
         query = Outfit.query
@@ -149,22 +163,21 @@ class RecommendationEngine:
 
         outfits = query.all()
 
-        # Safety net: if DB filters returned nothing, fall back to full catalogue
-        if not outfits:
-            outfits = Outfit.query.all()
-
         # Step 2 – Skin-tone pre-filter: remove outfits whose color palette is
         # incompatible with the user's detected skin tone.  Outfits with no
         # colors field are kept (cannot be evaluated).  A safety net ensures at
         # least 3 results are always returned even if the filter is too strict.
+        
+        # Apply skin-tone pre-filter (keep outfits with no colors field to avoid empty results)
         skin_tone = getattr(profile, 'skin_tone', None) if profile else None
         if skin_tone:
             outfits = self._filter_by_skin_tone(outfits, skin_tone)
 
-        # Step 3 â€“ Collaborative signal map {outfit_id: 0.0â€“1.0}
+        # Step 3 – Collaborative signal map {outfit_id: 0.0–1.0}
         collab_map = self._build_collaborative_map(profile)
 
-        # Step 4 â€“ Score every outfit
+        # Step 4 – Score every outfit
+        viewer_gender = (profile.gender or '').lower() if profile else ''
         scored = []
         for outfit in outfits:
             scores = self._calculate_scores(
@@ -172,6 +185,9 @@ class RecommendationEngine:
             )
             overall = self._calculate_overall_score(scores)
             outfit_dict = outfit.to_dict()
+            # Restore original shopping links behavior
+            outfit_dict['shopping_links'] = self._generate_shopping_links(outfit, viewer_gender)
+            outfit_dict['match_score'] = overall
             scored.append({
                 'outfit':        outfit_dict,
                 'scores':        scores,
@@ -449,6 +465,48 @@ class RecommendationEngine:
         if 'aurafit.store' in url_lower or 'example.com' in url_lower or 'placeholder' in url_lower:
             return 0.30
             
-        return 1.0
+        # Heavy bonus for real purchasable items
+        if getattr(outfit, 'purchasable', False):
+            return 1.0
+            
+        return 0.50
 
-    # Shopping links removed - UI now uses exact database product_url
+    def _generate_shopping_links(self, outfit, viewer_gender: str = '') -> Dict[str, str]:
+        """Return gender-aware Indian fashion-platform search URLs for the outfit.
+        Generates real search links on Myntra, Flipkart, Ajio, Amazon, etc.
+        This is the original shopping behavior restored from the project."""
+        from urllib.parse import quote_plus
+
+        outfit_gender = (outfit.gender or '').lower()
+        name_lower = (outfit.name or '').lower()
+
+        # Resolve gender label - don't double-add if name already has it
+        if 'women' in name_lower or "women's" in name_lower:
+            gender_label = ''
+        elif 'men' in name_lower or "men's" in name_lower:
+            gender_label = ''
+        elif outfit_gender == 'female':
+            gender_label = "women's"
+        elif outfit_gender == 'male':
+            gender_label = "men's"
+        elif viewer_gender == 'female':
+            gender_label = "women's"
+        elif viewer_gender == 'male':
+            gender_label = "men's"
+        else:
+            gender_label = ''
+
+        base_name = outfit.name or ''
+        q_raw = f"{gender_label} {base_name}".strip()
+        q = quote_plus(q_raw)
+
+        return {
+            'myntra':   f'https://www.myntra.com/search?rawQuery={q}',
+            'flipkart': f'https://www.flipkart.com/search?q={q}',
+            'ajio':     f'https://www.ajio.com/search/?text={q}',
+            'meesho':   f'https://www.meesho.com/search?q={q}',
+            'nykaa':    f'https://www.nykaa.com/search/result/?q={q}&root=search',
+            'amazon':   f'https://www.amazon.in/s?k={q}&i=apparel',
+            'hm':       f'https://www2.hm.com/en_in/search-results.html?q={q}',
+            'zara':     f'https://www.zara.com/in/en/search?searchTerm={q}',
+        }

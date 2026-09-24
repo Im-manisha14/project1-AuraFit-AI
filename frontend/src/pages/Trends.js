@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { outfitAPI } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiTrendingUp, FiStar, FiShoppingBag } from 'react-icons/fi';
+import { FiTrendingUp, FiStar } from 'react-icons/fi';
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const Trends = () => {

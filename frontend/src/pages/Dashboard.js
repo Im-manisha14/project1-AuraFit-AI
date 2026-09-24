@@ -6,6 +6,7 @@ import { FiTrendingUp, FiStar, FiArrowRight, FiShoppingBag } from 'react-icons/f
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const Dashboard = () => {
+  // eslint-disable-next-line no-unused-vars
   const [trending, setTrending] = useState([]);
   const [loading, setLoading] = useState(true);
 

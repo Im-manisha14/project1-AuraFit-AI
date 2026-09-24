@@ -3,6 +3,54 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 
 bp = Blueprint('outfit', __name__, url_prefix='/api/outfits')
 
+@bp.route('/test-shopping', methods=['GET', 'POST'])
+def test_shopping():
+    from services.shopping_service import SerpApiShoppingService
+    import os
+    
+    query = request.args.get('q', 'women burgundy midi dress')
+    if request.method == 'POST':
+        data = request.json or {}
+        query = data.get('q', query)
+        
+    service = SerpApiShoppingService()
+    if not service.is_configured():
+        return jsonify({"error": "SERPAPI_KEY is not configured", "status": "FAIL"}), 400
+        
+    try:
+        import requests
+        params = {
+            "engine": "google_shopping",
+            "q": query,
+            "gl": "in",
+            "hl": "en",
+            "api_key": service.api_key
+        }
+        resp = requests.get(service.base_url, params=params, timeout=10)
+        resp.raise_for_status()
+        results = resp.json().get("shopping_results", [])
+        
+        parsed = []
+        for r in results:
+            parsed.append({
+                "title": r.get("title"),
+                "retailer": r.get("source"),
+                "price": r.get("extracted_price"),
+                "currency": r.get("currency"),
+                "image_url": r.get("thumbnail"),
+                "merchant_url": r.get("product_link") or r.get("link"),
+                "product_id": r.get("product_id") or r.get("id"),
+                "delivery": r.get("delivery")
+            })
+            
+        return jsonify({
+            "status": "PASS",
+            "results_count": len(results),
+            "results": parsed
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "FAIL"}), 500
+
 @bp.route('/', methods=['GET'])
 @jwt_required()
 def get_outfits():
@@ -50,7 +98,22 @@ def get_outfit(outfit_id):
         if not outfit:
             return jsonify({'error': 'Outfit not found'}), 404
         
-        return jsonify({'outfit': outfit.to_dict()}), 200
+        outfit_dict = outfit.to_dict()
+        
+        # Attach shopping links (original behavior)
+        from flask_jwt_extended import get_jwt_identity as _get_jwt
+        from models.user import UserProfile
+        from services.recommendation_engine import RecommendationEngine
+        try:
+            user_id = int(_get_jwt())
+            profile = UserProfile.query.filter_by(user_id=user_id).first()
+            viewer_gender = (profile.gender or '').lower() if profile else ''
+            engine = RecommendationEngine()
+            outfit_dict['shopping_links'] = engine._generate_shopping_links(outfit, viewer_gender)
+        except Exception:
+            outfit_dict['shopping_links'] = {}
+        
+        return jsonify({'outfit': outfit_dict}), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

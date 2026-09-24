@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { recommendationAPI, userAPI } from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiHeart, FiUser, FiArrowRight, FiShoppingBag } from 'react-icons/fi';
+import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiUser, FiArrowRight, FiShoppingBag } from 'react-icons/fi';
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const COLLECTION_META = {
@@ -37,11 +37,15 @@ const GenderBadge = ({ gender }) => {
     </span>
   );
 };
-const checkValidUrl = (url) => {
-  if (!url) return false;
-  const lower = url.toLowerCase();
-  if (lower.includes('aurafit.store') || lower.includes('example.com') || lower.includes('placeholder')) return false;
-  return true;
+const SHOP_LABELS = {
+  myntra:   { label: 'Myntra',    color: '#FF3F6C' },
+  flipkart: { label: 'Flipkart', color: '#2874F0' },
+  ajio:     { label: 'Ajio',     color: '#E31E25' },
+  meesho:   { label: 'Meesho',   color: '#9B2D8E' },
+  nykaa:    { label: 'Nykaa',    color: '#FC2779' },
+  amazon:   { label: 'Amazon',   color: '#FF9900' },
+  hm:       { label: 'H&M',      color: '#E50010' },
+  zara:     { label: 'Zara',     color: '#111111' },
 };
 
 const Recommendations = () => {
@@ -60,8 +64,11 @@ const Recommendations = () => {
   });
   const [collections, setCollections] = useState({});
   const [collectionsLoading, setCollectionsLoading] = useState(false);
+  const [failedImages, setFailedImages] = useState(new Set());
+  const [shopOpen, setShopOpen] = useState(null);
 
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     checkProfileStatus();
   }, []);
@@ -84,7 +91,6 @@ const Recommendations = () => {
       const prefsRes = await userAPI.getPreferences();
       
       const profile = profileRes.data.profile;
-      const prefs = prefsRes.data.preferences;
       
       // Check if essential profile fields are filled
       // (preferred_styles is optional - don't gate on it)
@@ -309,7 +315,7 @@ const Recommendations = () => {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {recommendations.map((rec, index) => (
+              {recommendations.filter(rec => !failedImages.has(rec.outfit?.id)).map((rec, index) => (
                 <motion.div 
                   key={index} 
                   initial={{ opacity: 0, y: 50 }}
@@ -326,11 +332,14 @@ const Recommendations = () => {
                         src={rec.outfit.image_url}
                         alt={rec.outfit.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        onError={(e) => { e.target.onerror = null; e.target.src = `https://loremflickr.com/600/900/fashion,outfit?lock=${rec.outfit.id}`; }}
+                        onError={(e) => { 
+                          setFailedImages(prev => new Set(prev).add(rec.outfit?.id));
+                        }}
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <HiOutlineSparkles className="text-7xl text-gray-300" />
+                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                        <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" height="4em" width="4em" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        <p className="mt-2 text-sm font-medium">Image unavailable</p>
                       </div>
                     )}
                     
@@ -449,7 +458,7 @@ const Recommendations = () => {
                       )}
                       {rec.outfit?.price ? (
                         <span className="text-lg font-bold text-amber-600">
-                          ${rec.outfit.price.toFixed(2)}
+                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: rec.outfit.currency || 'INR' }).format(rec.outfit.price)}
                         </span>
                       ) : null}
                     </div>
@@ -470,23 +479,43 @@ const Recommendations = () => {
                         <button disabled className="w-full bg-gray-200 text-gray-500 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed">
                           <span>Out of Stock</span>
                         </button>
-                      ) : (!checkValidUrl(rec.outfit?.product_url)) ? (
-                        <button disabled className="w-full bg-gray-100 text-gray-500 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed border border-gray-200">
-                          <span>Shopping Link Unavailable</span>
-                        </button>
-                      ) : (
-                        <motion.a
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                          href={rec.outfit.product_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full bg-amber-600 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-amber-700 transition-colors flex items-center justify-center space-x-2"
-                        >
-                          <FiShoppingBag />
-                          <span>Shop Exact Item</span>
-                        </motion.a>
-                      )}
+                      ) : rec.outfit?.shopping_links && Object.keys(rec.outfit.shopping_links).length > 0 ? (
+                        <div>
+                          <button
+                            onClick={() => setShopOpen(shopOpen === `rec-${index}` ? null : `rec-${index}`)}
+                            className="w-full bg-amber-600 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-amber-700 transition-colors flex items-center justify-center space-x-2"
+                          >
+                            <FiShoppingBag />
+                            <span>{shopOpen === `rec-${index}` ? 'Hide Links' : 'Shop Now'}</span>
+                          </button>
+                          {shopOpen === `rec-${index}` && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="grid grid-cols-4 gap-1 mt-2"
+                            >
+                              {Object.entries(rec.outfit.shopping_links).map(([platform, url]) => {
+                                const s = SHOP_LABELS[platform];
+                                if (!s) return null;
+                                return (
+                                  <a
+                                    key={platform}
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
+                                    style={{ borderColor: s.color, color: s.color }}
+                                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
+                                  >
+                                    {s.label}
+                                  </a>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </motion.div>
@@ -504,9 +533,9 @@ const Recommendations = () => {
             className="bg-white border border-gray-200 p-16 text-center"
           >
             <HiOutlineSparkles className="text-7xl text-amber-500 mx-auto mb-6" />
-            <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">No Recommendations Yet</h3>
+            <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">No live dresses found for these preferences</h3>
             <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
-              Set your preferences above and click generate to get personalized outfit recommendations!
+              Please adjust your filters and try generating again.
             </p>
           </motion.div>
         )}
@@ -556,7 +585,7 @@ const Recommendations = () => {
                       className="flex gap-5 pb-4"
                       style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                     >
-                      {outfits.map((outfit, idx) => (
+                      {outfits.filter(outfit => !failedImages.has(outfit.id)).map((outfit, idx) => (
                         <motion.div
                           key={outfit.id}
                           initial={{ opacity: 0, x: 20 }}
@@ -572,11 +601,14 @@ const Recommendations = () => {
                                 src={outfit.image_url}
                                 alt={outfit.name}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                                onError={(e) => { e.target.onerror = null; e.target.src = `https://loremflickr.com/600/900/fashion,outfit?lock=${outfit.id}`; }}
+                                onError={(e) => { 
+                                  setFailedImages(prev => new Set(prev).add(outfit.id));
+                                }}
                               />
                             ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <HiOutlineSparkles className="text-5xl text-gray-300" />
+                              <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+                                <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" height="4em" width="4em" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                                <p className="mt-2 text-sm font-medium">Image unavailable</p>
                               </div>
                             )}
                             {outfit.match_score != null && (
@@ -635,7 +667,7 @@ const Recommendations = () => {
                               )}
                               {outfit.price && (
                                 <span className="text-sm font-bold text-amber-600">
-                                  ${outfit.price.toFixed(2)}
+                                  {new Intl.NumberFormat('en-IN', { style: 'currency', currency: outfit.currency || 'INR' }).format(outfit.price)}
                                 </span>
                               )}
                             </div>
@@ -644,21 +676,45 @@ const Recommendations = () => {
                               <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-200 text-gray-500 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed">
                                 <span>Out of Stock</span>
                               </button>
-                            ) : (!checkValidUrl(outfit.product_url)) ? (
-                              <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-100 text-gray-500 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed border border-gray-200">
-                                <span>Shopping Link Unavailable</span>
-                              </button>
-                            ) : (
-                              <a
-                                href={outfit.product_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2.5 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
-                              >
-                                <FiShoppingBag className="text-xs" />
-                                <span>Shop Exact Item</span>
-                              </a>
-                            )}
+                            ) : outfit.shopping_links && Object.keys(outfit.shopping_links).length > 0 ? (
+                              <div>
+                                <button
+                                  onClick={() => setShopOpen(
+                                    shopOpen === `${key}-${outfit.id}` ? null : `${key}-${outfit.id}`
+                                  )}
+                                  className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2.5 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
+                                >
+                                  <FiShoppingBag className="text-xs" />
+                                  <span>{shopOpen === `${key}-${outfit.id}` ? 'Hide' : 'Shop Now'}</span>
+                                </button>
+                                {shopOpen === `${key}-${outfit.id}` && (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: -4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="grid grid-cols-4 gap-1 mt-2"
+                                  >
+                                    {Object.entries(outfit.shopping_links).map(([platform, url]) => {
+                                      const s = SHOP_LABELS[platform];
+                                      if (!s) return null;
+                                      return (
+                                        <a
+                                          key={platform}
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
+                                          style={{ borderColor: s.color, color: s.color }}
+                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
+                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
+                                        >
+                                          {s.label}
+                                        </a>
+                                      );
+                                    })}
+                                  </motion.div>
+                                )}
+                              </div>
+                            ) : null}
                           </div>
                         </motion.div>
                       ))}

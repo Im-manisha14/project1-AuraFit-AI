@@ -43,6 +43,8 @@ class Outfit(db.Model):
     store = db.Column(db.String(100))
     product_url = db.Column(db.String(500))
     in_stock = db.Column(db.Boolean, default=True)
+    purchasable = db.Column(db.Boolean, default=False)
+    source = db.Column(db.String(50), default='mock') # 'mock' or 'shopping_api'
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -76,7 +78,9 @@ class Outfit(db.Model):
             'brand': self.brand,
             'store': self.store,
             'product_url': self.product_url,
-            'in_stock': self.in_stock
+            'in_stock': self.in_stock,
+            'purchasable': self.purchasable,
+            'source': self.source
         }
 
 class UserFeedback(db.Model):
