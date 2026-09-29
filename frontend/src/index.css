@@ -108,3 +108,49 @@ code {
 .badge-info {
   @apply bg-blue-100 text-blue-800;
 }
+
+/* Recommendation Cards Vertical Flex Layout & Alignment */
+.recommendations-grid {
+  display: grid;
+  align-items: stretch;
+}
+
+.recommendation-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.recommendation-card-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.recommendation-card-title {
+  min-height: 56px;
+}
+
+.recommendation-card-description {
+  min-height: 48px;
+}
+
+.recommendation-card-tags {
+  min-height: 28px;
+}
+
+.recommendation-card-footer {
+  margin-top: auto;
+}
+
+@media (max-width: 640px) {
+  .recommendation-card-title {
+    min-height: auto;
+  }
+  .recommendation-card-description {
+    min-height: auto;
+  }
+  .recommendation-card-tags {
+    min-height: auto;
+  }
+}

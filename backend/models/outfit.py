@@ -42,18 +42,43 @@ class Outfit(db.Model):
     brand = db.Column(db.String(100))
     store = db.Column(db.String(100))
     product_url = db.Column(db.String(500))
+    original_price = db.Column(db.Float, nullable=True)
+    discount = db.Column(db.String(50), nullable=True)
     in_stock = db.Column(db.Boolean, default=True)
     purchasable = db.Column(db.Boolean, default=False)
     source = db.Column(db.String(50), default='mock') # 'mock' or 'shopping_api'
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
     
+    @staticmethod
+    def is_exact_product_url(url: str) -> bool:
+        """Verify that the URL is a genuine direct product page and NOT a search or placeholder page."""
+        if not url or not (url.startswith('http://') or url.startswith('https://')):
+            return False
+        url_lower = url.lower()
+        if any(d in url_lower for d in ['aurafit.store', 'example.com', 'localhost', '127.0.0']):
+            return False
+        # Reject search / query result pages
+        if any(sp in url_lower for sp in [
+            'amazon.in/s?', 'amazon.com/s?', 'amazon.in/s/', 'amazon.com/s/',
+            '/search?', '/search/', 'rawquery=', '?q=', '&q=', 'searchterm='
+        ]):
+            return False
+        if 'google.com/shopping' in url_lower or 'google.com/search' in url_lower or 'google.com/url?' in url_lower:
+            return False
+        return True
+
     def to_dict(self):
+        exact_available = Outfit.is_exact_product_url(self.product_url)
         return {
             'id': self.id,
             'external_id': self.external_id,
             'name': self.name,
+            'title': self.name,
             'description': self.description,
             'category': self.category,
             'top': self.top,
@@ -74,13 +99,20 @@ class Outfit(db.Model):
             'is_trending': self.is_trending,
             'trend_score': self.trend_score,
             'price': self.price,
-            'currency': self.currency,
+            'currency': self.currency or 'INR',
+            'original_price': self.original_price,
+            'discount': self.discount,
+            'availability': 'IN STOCK' if self.in_stock else 'OUT OF STOCK',
             'brand': self.brand,
             'store': self.store,
+            'retailer': self.store or self.brand,
             'product_url': self.product_url,
+            'shopping_url': self.product_url if exact_available else None,
+            'exact_product_link_available': exact_available,
             'in_stock': self.in_stock,
             'purchasable': self.purchasable,
-            'source': self.source
+            'source': self.source,
+            'is_live': self.source == 'serpapi'
         }
 
 class UserFeedback(db.Model):
@@ -104,6 +136,30 @@ class UserFeedback(db.Model):
     
     outfit = db.relationship('Outfit', backref='feedbacks')
     
+    def __init__(
+        self,
+        user_id=None,
+        outfit_id=None,
+        rating=None,
+        liked=None,
+        worn=False,
+        comfort_feedback=None,
+        style_feedback=None,
+        comments=None,
+        **kwargs
+    ):
+        super().__init__(
+            user_id=user_id,
+            outfit_id=outfit_id,
+            rating=rating,
+            liked=liked,
+            worn=worn,
+            comfort_feedback=comfort_feedback,
+            style_feedback=style_feedback,
+            comments=comments,
+            **kwargs
+        )
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -141,6 +197,32 @@ class Recommendation(db.Model):
     user = db.relationship('User', backref='recommendations')
     outfit = db.relationship('Outfit', backref='recommendations')
     
+    def __init__(
+        self,
+        user_id=None,
+        outfit_id=None,
+        overall_score=None,
+        style_match_score=None,
+        comfort_score=None,
+        trend_score=None,
+        body_type_score=None,
+        occasion=None,
+        season=None,
+        **kwargs
+    ):
+        super().__init__(
+            user_id=user_id,
+            outfit_id=outfit_id,
+            overall_score=overall_score,
+            style_match_score=style_match_score,
+            comfort_score=comfort_score,
+            trend_score=trend_score,
+            body_type_score=body_type_score,
+            occasion=occasion,
+            season=season,
+            **kwargs
+        )
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -173,6 +255,20 @@ class OutfitInteraction(db.Model):
 
     user = db.relationship('User', backref='interactions')
     outfit = db.relationship('Outfit', backref='interactions')
+
+    def __init__(
+        self,
+        user_id=None,
+        outfit_id=None,
+        interaction_type='view',
+        **kwargs
+    ):
+        super().__init__(
+            user_id=user_id,
+            outfit_id=outfit_id,
+            interaction_type=interaction_type,
+            **kwargs
+        )
 
     def to_dict(self):
         return {

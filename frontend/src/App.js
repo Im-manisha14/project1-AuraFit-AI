@@ -76,6 +76,14 @@ function App() {
               }
             />
             <Route
+              path="/outfits/:id"
+              element={
+                <PrivateRoute>
+                  <OutfitDetail />
+                </PrivateRoute>
+              }
+            />
+            <Route
               path="/trends"
               element={<Trends />}
             />

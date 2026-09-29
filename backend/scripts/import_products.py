@@ -93,13 +93,19 @@ def import_csv(filepath: str):
                     if existing:
                         # Additive update mode: we update pricing, availability, and URL
                         existing.price = price
-                        existing.in_stock = str(row.get('in_stock', '')).strip().lower() == 'true'
+                        in_stock_bool = str(row.get('in_stock', '')).strip().lower() == 'true'
+                        existing.in_stock = in_stock_bool
                         existing.product_url = product_url
+                        existing.purchasable = Outfit.is_exact_product_url(product_url) and in_stock_bool
+                        if row.get('retailer'):
+                            existing.retailer = row.get('retailer').strip()
+                            existing.store = row.get('retailer').strip()
                         stats['updated'] += 1
-                        # We intentionally do not overwrite the user's manual style categorization if it exists,
-                        # but we update the critical purchasability data.
                     else:
                         # 3. Create new record
+                        in_stock_bool = str(row.get('in_stock', '')).strip().lower() == 'true'
+                        is_purchasable = Outfit.is_exact_product_url(product_url) and in_stock_bool
+                        retailer_name = row.get('retailer', '').strip()
                         o = Outfit(
                             external_id=ext_id,
                             name=name,
@@ -109,14 +115,15 @@ def import_csv(filepath: str):
                             colors=normalized_colors,
                             image_url=row.get('image_url', '').strip(),
                             price=price,
-                            currency=row.get('currency', 'USD').strip().upper(),
-                            store=row.get('retailer', '').strip(),
+                            currency=row.get('currency', 'INR').strip().upper(),
+                            store=retailer_name,
                             product_url=product_url,
-                            in_stock=str(row.get('in_stock', '')).strip().lower() == 'true',
+                            in_stock=in_stock_bool,
+                            purchasable=is_purchasable,
+                            source='retail_catalog',
                             occasion=row.get('occasion', 'casual').strip().lower(),
                             season=row.get('season', 'all').strip().lower(),
                             style_type=row.get('style', '').strip().lower(),
-                            # parse compatibility if provided, else None
                             body_type_compatibility=[b.strip().lower() for b in row.get('body_types', '').split(',') if b.strip()] or None
                         )
                         db.session.add(o)

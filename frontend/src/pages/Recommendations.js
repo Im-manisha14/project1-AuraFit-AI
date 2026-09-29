@@ -53,6 +53,7 @@ const Recommendations = () => {
   const location = useLocation();
   const autoGenerateRef = useRef(location.state?.autoGenerate || false);
   const [recommendations, setRecommendations] = useState([]);
+  const [similarRecommendations, setSimilarRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileComplete, setProfileComplete] = useState(true);
@@ -65,12 +66,11 @@ const Recommendations = () => {
   const [collections, setCollections] = useState({});
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [failedImages, setFailedImages] = useState(new Set());
-  const [shopOpen, setShopOpen] = useState(null);
 
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     checkProfileStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadCollections = async () => {
@@ -88,7 +88,7 @@ const Recommendations = () => {
   const checkProfileStatus = async () => {
     try {
       const profileRes = await userAPI.getProfile();
-      const prefsRes = await userAPI.getPreferences();
+      await userAPI.getPreferences();
       
       const profile = profileRes.data.profile;
       
@@ -140,6 +140,7 @@ const Recommendations = () => {
     try {
       const response = await recommendationAPI.generate(filters);
       setRecommendations(response.data.recommendations || []);
+      setSimilarRecommendations(response.data.similar_recommendations || []);
       loadCollections();
     } catch (error) {
       console.error('Error generating recommendations:', error);
@@ -314,7 +315,7 @@ const Recommendations = () => {
               <div className="h-1 flex-1 ml-8 bg-gradient-to-r from-amber-600 to-transparent"></div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="recommendations-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
               {recommendations.filter(rec => !failedImages.has(rec.outfit?.id)).map((rec, index) => (
                 <motion.div 
                   key={index} 
@@ -323,17 +324,21 @@ const Recommendations = () => {
                   viewport={{ once: true, margin: "-50px" }}
                   transition={{ duration: 0.6, delay: index * 0.1 }}
                   whileHover={{ y: -8 }}
-                  className="bg-white border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 group"
+                  className="recommendation-card h-full flex flex-col bg-white border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 group"
                 >
                   {/* Image Section */}
-                  <div className="relative bg-gray-100 h-64 overflow-hidden">
-                    {rec.outfit?.image_url ? (
+                  <div className="relative bg-gray-100 h-64 overflow-hidden flex-shrink-0">
+                    {rec.outfit?.image_url && !failedImages.has(rec.outfit?.id) ? (
                       <img
                         src={rec.outfit.image_url}
                         alt={rec.outfit.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         onError={(e) => { 
-                          setFailedImages(prev => new Set(prev).add(rec.outfit?.id));
+                          if (rec.outfit?.additional_images && rec.outfit.additional_images.length > 0 && e.target.src !== rec.outfit.additional_images[0]) {
+                            e.target.src = rec.outfit.additional_images[0];
+                          } else {
+                            setFailedImages(prev => new Set(prev).add(rec.outfit?.id));
+                          }
                         }}
                       />
                     ) : (
@@ -355,19 +360,19 @@ const Recommendations = () => {
                   </div>
 
                   {/* Content Section */}
-                  <div className="p-6">
-                    <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="recommendation-card-content p-6 flex flex-col flex-1">
+                    <div className="recommendation-card-title flex items-start justify-between gap-2 mb-2">
                       <h3 className="text-xl font-bold text-gray-900 tracking-tight leading-snug">
                         {rec.outfit?.name}
                       </h3>
                       <GenderBadge gender={rec.outfit?.gender} />
                     </div>
-                    <p className="text-gray-600 text-sm mb-4 font-light leading-relaxed">
+                    <p className="recommendation-card-description text-gray-600 text-sm mb-4 font-light leading-relaxed">
                       {rec.outfit?.description}
                     </p>
 
                     {/* Occasion + Season tags */}
-                    <div className="flex flex-wrap gap-1 mb-4">
+                    <div className="recommendation-card-tags flex flex-wrap gap-1 mb-4 items-center">
                       {rec.outfit?.occasion && (
                         <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full capitalize font-medium">
                           {rec.outfit.occasion}
@@ -406,37 +411,37 @@ const Recommendations = () => {
                     </div>
 
                     {/* Dress Structure */}
-                    {(rec.outfit?.top || rec.outfit?.bottom || rec.outfit?.shoes || rec.outfit?.accessories?.length > 0) && (
-                      <div className="mb-4 pb-4 border-b border-gray-100">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">Outfit Pieces</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                          {rec.outfit?.top && (
+                    {(() => {
+                      const pTop = rec.outfit?.top || (rec.outfit?.name?.toLowerCase().includes('dress') ? rec.outfit.name : 'Styled Top');
+                      const pBottom = rec.outfit?.bottom || (rec.outfit?.name?.toLowerCase().includes('dress') ? 'Flowy Silhouette Hem' : 'Matching Bottom');
+                      const pShoes = rec.outfit?.shoes || (rec.outfit?.occasion === 'party' || rec.outfit?.style_type === 'glamorous' ? 'Stiletto Heels' : rec.outfit?.occasion === 'work' ? 'Pointed Pumps' : rec.outfit?.style_type === 'ethnic' ? 'Embroidered Juttis' : 'Classic White Sneakers');
+                      const pAcc = (rec.outfit?.accessories && rec.outfit.accessories.length > 0)
+                        ? (Array.isArray(rec.outfit.accessories) ? rec.outfit.accessories.join(', ') : rec.outfit.accessories)
+                        : (rec.outfit?.style_type === 'ethnic' ? 'Traditional Jhumkas' : rec.outfit?.occasion === 'party' ? 'Evening Clutch' : 'Minimalist Watch');
+                      return (
+                        <div className="mb-4 pb-4 border-b border-gray-100">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">Outfit Pieces</p>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                             <div className="flex items-start gap-1.5">
                               <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Top</span>
-                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.top}</span>
+                              <span className="text-xs text-gray-700 leading-snug truncate" title={pTop}>{pTop}</span>
                             </div>
-                          )}
-                          {rec.outfit?.bottom && (
                             <div className="flex items-start gap-1.5">
                               <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Bottom</span>
-                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.bottom}</span>
+                              <span className="text-xs text-gray-700 leading-snug truncate" title={pBottom}>{pBottom}</span>
                             </div>
-                          )}
-                          {rec.outfit?.shoes && (
                             <div className="flex items-start gap-1.5">
                               <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Shoes</span>
-                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.shoes}</span>
+                              <span className="text-xs text-gray-700 leading-snug truncate" title={pShoes}>{pShoes}</span>
                             </div>
-                          )}
-                          {rec.outfit?.accessories?.length > 0 && (
                             <div className="flex items-start gap-1.5">
                               <span className="text-xs text-amber-600 font-bold uppercase tracking-wide mt-0.5">Acc</span>
-                              <span className="text-xs text-gray-700 leading-snug">{rec.outfit.accessories.join(', ')}</span>
+                              <span className="text-xs text-gray-700 leading-snug truncate" title={pAcc}>{pAcc}</span>
                             </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Colors */}
                     {rec.outfit?.colors && rec.outfit.colors.length > 0 && (
@@ -449,76 +454,181 @@ const Recommendations = () => {
                       </div>
                     )}
 
-                    {/* Product Details (Price & Brand) */}
-                    <div className="flex justify-between items-center mb-4">
-                      {rec.outfit?.brand && (
-                        <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">
-                          {rec.outfit.brand}
-                        </span>
-                      )}
-                      {rec.outfit?.price ? (
-                        <span className="text-lg font-bold text-amber-600">
-                          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: rec.outfit.currency || 'INR' }).format(rec.outfit.price)}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col gap-2 mb-2">
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => navigate(`/outfit/${rec.outfit?.id}`)}
-                        className="w-full bg-white border border-gray-900 text-gray-900 py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2"
-                      >
-                        <span>View Details</span>
-                        <FiStar />
-                      </motion.button>
-                      
-                      {(!rec.outfit?.in_stock) ? (
-                        <button disabled className="w-full bg-gray-200 text-gray-500 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed">
-                          <span>Out of Stock</span>
-                        </button>
-                      ) : rec.outfit?.shopping_links && Object.keys(rec.outfit.shopping_links).length > 0 ? (
-                        <div>
-                          <button
-                            onClick={() => setShopOpen(shopOpen === `rec-${index}` ? null : `rec-${index}`)}
-                            className="w-full bg-amber-600 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-amber-700 transition-colors flex items-center justify-center space-x-2"
-                          >
-                            <FiShoppingBag />
-                            <span>{shopOpen === `rec-${index}` ? 'Hide Links' : 'Shop Now'}</span>
-                          </button>
-                          {shopOpen === `rec-${index}` && (
-                            <motion.div
-                              initial={{ opacity: 0, y: -4 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              className="grid grid-cols-4 gap-1 mt-2"
-                            >
-                              {Object.entries(rec.outfit.shopping_links).map(([platform, url]) => {
-                                const s = SHOP_LABELS[platform];
-                                if (!s) return null;
-                                return (
-                                  <a
-                                    key={platform}
-                                    href={url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
-                                    style={{ borderColor: s.color, color: s.color }}
-                                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
-                                  >
-                                    {s.label}
-                                  </a>
-                                );
-                              })}
-                            </motion.div>
+                    {/* Footer Section: Product Details & Action Buttons */}
+                    <div className="recommendation-card-footer mt-auto pt-3 border-t border-gray-100">
+                      {/* Product Details (Price, Retailer, MRP & Discount) */}
+                      <div className="flex flex-col gap-1 mb-4">
+                        <div className="flex justify-between items-center min-h-[20px]">
+                          <span className="text-xs font-bold text-gray-800 uppercase tracking-wide truncate">
+                            {rec.outfit?.retailer || rec.outfit?.store || rec.outfit?.brand}
+                          </span>
+                          {rec.outfit?.availability && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider flex-shrink-0 ${
+                              rec.outfit.availability === 'LIMITED' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
+                            }`}>
+                              {rec.outfit.availability}
+                            </span>
                           )}
                         </div>
-                      ) : null}
+                        <div className="flex items-baseline gap-2 flex-wrap min-h-[28px]">
+                          {rec.outfit?.price ? (
+                            <span className="text-lg font-bold text-amber-600">
+                              {new Intl.NumberFormat('en-IN', { style: 'currency', currency: rec.outfit.currency || 'INR' }).format(rec.outfit.price)}
+                            </span>
+                          ) : null}
+                          {rec.outfit?.original_price && rec.outfit.original_price > rec.outfit.price && (
+                            <span className="text-xs text-gray-400 line-through">
+                              MRP {new Intl.NumberFormat('en-IN', { style: 'currency', currency: rec.outfit.currency || 'INR' }).format(rec.outfit.original_price)}
+                            </span>
+                          )}
+                          {rec.outfit?.discount && (
+                            <span className="text-xs font-bold text-green-600">
+                              {rec.outfit.discount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-col gap-2 mb-2">
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => navigate(`/outfit/${rec.outfit?.id}`)}
+                          className="w-full bg-white border border-gray-900 text-gray-900 py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2"
+                        >
+                          <span>View Details</span>
+                          <FiStar />
+                        </motion.button>
+                        
+                        {(!rec.outfit?.in_stock) ? (
+                          <button disabled className="w-full bg-gray-200 text-gray-500 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed">
+                            <span>Out of Stock</span>
+                          </button>
+                        ) : (rec.outfit?.exact_product_link_available && (rec.outfit.shopping_url || rec.outfit.product_url)) ? (
+                          <div>
+                            <motion.a
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                              href={rec.outfit.shopping_url || rec.outfit.product_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full bg-amber-600 text-white py-3 font-medium text-xs tracking-widest uppercase hover:bg-amber-700 transition-colors flex items-center justify-center space-x-2"
+                            >
+                              <FiShoppingBag />
+                              <span>Shop Now</span>
+                            </motion.a>
+                            {rec.outfit?.shopping_links && Object.keys(rec.outfit.shopping_links).length > 1 && (
+                              <div className="grid grid-cols-4 gap-1 mt-2">
+                                {Object.entries(rec.outfit.shopping_links).map(([platform, url]) => {
+                                  const s = SHOP_LABELS[platform];
+                                  if (!s) return null;
+                                  return (
+                                    <a
+                                      key={platform}
+                                      href={url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
+                                      style={{ borderColor: s.color, color: s.color }}
+                                      onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
+                                    >
+                                      {s.label}
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <button disabled className="w-full bg-gray-100 text-gray-400 py-3 font-medium text-xs tracking-widest uppercase flex items-center justify-center space-x-2 cursor-not-allowed border border-gray-200">
+                            <span>Shopping Link Unavailable</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Similar Recommendations Section (Live SerpApi Products) */}
+        {similarRecommendations.length > 0 && !loading && (
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="mb-16"
+          >
+            <div className="flex items-center mb-8">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
+                  Similar Real Products
+                </h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Curated live from Google Shopping matching your occasion and style
+                </p>
+              </div>
+              <div className="h-1 flex-1 ml-8 bg-gradient-to-r from-amber-600 to-transparent"></div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-stretch">
+              {similarRecommendations
+                .filter(sim => !failedImages.has(sim.id) && !failedImages.has(sim.external_id) && sim.image_url)
+                .map((sim, sIdx) => (
+                <div key={sIdx} className="bg-white border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-all p-4 flex flex-col h-full">
+                  <div className="h-56 overflow-hidden bg-gray-100 mb-3 relative flex-shrink-0">
+                    <img
+                      src={sim.image_url}
+                      alt={sim.name || sim.title}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        if (sim.additional_images && sim.additional_images.length > 0 && e.target.src !== sim.additional_images[0]) {
+                          e.target.src = sim.additional_images[0];
+                        } else {
+                          setFailedImages(prev => new Set(prev).add(sim.id || sim.external_id));
+                        }
+                      }}
+                    />
+                    <span className="absolute top-2 right-2 bg-gray-900 text-white text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
+                      Live Offer
+                    </span>
+                  </div>
+                  <div className="flex-1 flex flex-col">
+                    <span className="text-[11px] font-bold text-gray-700 uppercase tracking-wider block mb-1 truncate">
+                      {sim.retailer || sim.store}
+                    </span>
+                    <h4 className="text-sm font-semibold text-gray-900 line-clamp-2 mb-2 leading-snug min-h-[2.5rem]">
+                      {sim.name || sim.title}
+                    </h4>
+                    <p className="text-base font-bold text-amber-600 mb-3">
+                      {new Intl.NumberFormat('en-IN', { style: 'currency', currency: sim.currency || 'INR' }).format(sim.price)}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1.5 mt-auto">
+                    {sim.id && (
+                      <button
+                        onClick={() => navigate(`/outfit/${sim.id}`)}
+                        className="w-full bg-white border border-gray-900 text-gray-900 py-2 text-xs font-semibold uppercase tracking-wider hover:bg-gray-50 flex items-center justify-center gap-1.5"
+                      >
+                        <FiStar className="text-xs" />
+                        <span>View Details</span>
+                      </button>
+                    )}
+                    <a
+                      href={sim.shopping_url || sim.product_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full bg-amber-600 text-white py-2 text-xs font-semibold uppercase tracking-wider text-center hover:bg-amber-700 flex items-center justify-center gap-1.5"
+                    >
+                      <FiShoppingBag />
+                      <span>Shop Now</span>
+                    </a>
+                  </div>
+                </div>
               ))}
             </div>
           </motion.div>
@@ -533,7 +643,7 @@ const Recommendations = () => {
             className="bg-white border border-gray-200 p-16 text-center"
           >
             <HiOutlineSparkles className="text-7xl text-amber-500 mx-auto mb-6" />
-            <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">No live dresses found for these preferences</h3>
+            <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Live shopping results are temporarily unavailable</h3>
             <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
               Please adjust your filters and try generating again.
             </p>
@@ -582,7 +692,7 @@ const Recommendations = () => {
 
                     {/* Horizontal Scroll Row */}
                     <div
-                      className="flex gap-5 pb-4"
+                      className="flex gap-5 pb-4 items-stretch"
                       style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                     >
                       {outfits.filter(outfit => !failedImages.has(outfit.id)).map((outfit, idx) => (
@@ -592,16 +702,16 @@ const Recommendations = () => {
                           whileInView={{ opacity: 1, x: 0 }}
                           viewport={{ once: true }}
                           transition={{ delay: idx * 0.04 }}
-                          className="flex-shrink-0 w-60 bg-white border border-gray-200 overflow-visible shadow-sm hover:shadow-md transition-all group"
+                          className="flex-shrink-0 w-60 bg-white border border-gray-200 overflow-visible shadow-sm hover:shadow-md transition-all group flex flex-col"
                         >
                           {/* Outfit Image */}
-                          <div className="relative h-48 bg-gray-100 overflow-hidden">
-                            {outfit.image_url ? (
+                          <div className="relative h-48 bg-gray-100 overflow-hidden flex-shrink-0">
+                            {outfit.image_url && !failedImages.has(outfit.id) ? (
                               <img
                                 src={outfit.image_url}
                                 alt={outfit.name}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                                onError={(e) => { 
+                                onError={() => { 
                                   setFailedImages(prev => new Set(prev).add(outfit.id));
                                 }}
                               />
@@ -619,7 +729,7 @@ const Recommendations = () => {
                           </div>
 
                           {/* Card Body */}
-                          <div className="p-4">
+                          <div className="p-4 flex-1 flex flex-col">
                             <div className="flex items-start justify-between gap-1 mb-1">
                               <p className="font-semibold text-gray-900 text-sm truncate flex-1" title={outfit.name}>{outfit.name}</p>
                               <GenderBadge gender={outfit.gender} />
@@ -627,94 +737,96 @@ const Recommendations = () => {
                             <p className="text-xs text-gray-500 mb-2 capitalize tracking-wide">{outfit.style_type}</p>
 
                             {/* Dress Structure */}
-                            {(outfit.top || outfit.bottom || outfit.shoes || outfit.accessories?.length > 0) && (
-                              <div className="mb-3 pb-2 border-b border-gray-100">
-                                <div className="space-y-0.5">
-                                  {outfit.top && (
+                            {(() => {
+                              const pTop = outfit.top || (outfit.name?.toLowerCase().includes('dress') ? outfit.name : 'Styled Top');
+                              const pBottom = outfit.bottom || (outfit.name?.toLowerCase().includes('dress') ? 'Flowy Silhouette Hem' : 'Matching Bottom');
+                              const pShoes = outfit.shoes || (outfit.occasion === 'party' || outfit.style_type === 'glamorous' ? 'Stiletto Heels' : outfit.occasion === 'work' ? 'Pointed Pumps' : outfit.style_type === 'ethnic' ? 'Embroidered Juttis' : 'Classic White Sneakers');
+                              const pAcc = (outfit.accessories && outfit.accessories.length > 0)
+                                ? (Array.isArray(outfit.accessories) ? outfit.accessories.join(', ') : outfit.accessories)
+                                : (outfit.style_type === 'ethnic' ? 'Traditional Jhumkas' : outfit.occasion === 'party' ? 'Evening Clutch' : 'Minimalist Watch');
+                              return (
+                                <div className="mb-3 pb-2 border-b border-gray-100">
+                                  <div className="space-y-0.5">
                                     <div className="flex gap-1 text-xs">
                                       <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Top</span>
-                                      <span className="text-gray-600 leading-snug">{outfit.top}</span>
+                                      <span className="text-gray-600 leading-snug truncate" title={pTop}>{pTop}</span>
                                     </div>
-                                  )}
-                                  {outfit.bottom && (
                                     <div className="flex gap-1 text-xs">
                                       <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Bottom</span>
-                                      <span className="text-gray-600 leading-snug">{outfit.bottom}</span>
+                                      <span className="text-gray-600 leading-snug truncate" title={pBottom}>{pBottom}</span>
                                     </div>
-                                  )}
-                                  {outfit.shoes && (
                                     <div className="flex gap-1 text-xs">
                                       <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Shoes</span>
-                                      <span className="text-gray-600 leading-snug">{outfit.shoes}</span>
+                                      <span className="text-gray-600 leading-snug truncate" title={pShoes}>{pShoes}</span>
                                     </div>
-                                  )}
-                                  {outfit.accessories?.length > 0 && (
                                     <div className="flex gap-1 text-xs">
                                       <span className="text-amber-600 font-bold uppercase w-12 flex-shrink-0">Acc</span>
-                                      <span className="text-gray-600 leading-snug">{outfit.accessories.join(', ')}</span>
+                                      <span className="text-gray-600 leading-snug truncate" title={pAcc}>{pAcc}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
+                            {/* Footer Section: Product Details & Shop Button */}
+                            <div className="mt-auto pt-2 border-t border-gray-100">
+                              <div className="flex justify-between items-center mb-3 min-h-[1.5rem]">
+                                {outfit.brand && (
+                                  <span className="text-xs font-bold text-gray-800 uppercase truncate mr-2">
+                                    {outfit.brand}
+                                  </span>
+                                )}
+                                {outfit.price && (
+                                  <span className="text-sm font-bold text-amber-600 flex-shrink-0">
+                                    {new Intl.NumberFormat('en-IN', { style: 'currency', currency: outfit.currency || 'INR' }).format(outfit.price)}
+                                  </span>
+                                )}
+                              </div>
+
+                              {(!outfit.in_stock) ? (
+                                <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-200 text-gray-500 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed">
+                                  <span>Out of Stock</span>
+                                </button>
+                              ) : (outfit.exact_product_link_available && (outfit.shopping_url || outfit.product_url)) ? (
+                                <div>
+                                  <a
+                                    href={outfit.shopping_url || outfit.product_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2.5 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
+                                  >
+                                    <FiShoppingBag className="text-xs" />
+                                    <span>Shop Now</span>
+                                  </a>
+                                  {outfit.shopping_links && Object.keys(outfit.shopping_links).length > 1 && (
+                                    <div className="grid grid-cols-4 gap-1 mt-2">
+                                      {Object.entries(outfit.shopping_links).map(([platform, url]) => {
+                                        const s = SHOP_LABELS[platform];
+                                        if (!s) return null;
+                                        return (
+                                          <a
+                                            key={platform}
+                                            href={url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
+                                            style={{ borderColor: s.color, color: s.color }}
+                                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
+                                          >
+                                            {s.label}
+                                          </a>
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
-                              </div>
-                            )}
-
-                            {/* Product Details & Shop Button */}
-                            <div className="flex justify-between items-center mb-3">
-                              {outfit.brand && (
-                                <span className="text-xs font-bold text-gray-800 uppercase">
-                                  {outfit.brand}
-                                </span>
-                              )}
-                              {outfit.price && (
-                                <span className="text-sm font-bold text-amber-600">
-                                  {new Intl.NumberFormat('en-IN', { style: 'currency', currency: outfit.currency || 'INR' }).format(outfit.price)}
-                                </span>
+                              ) : (
+                                <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-100 text-gray-400 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed border border-gray-200">
+                                  <span>Shopping Link Unavailable</span>
+                                </button>
                               )}
                             </div>
-
-                            {(!outfit.in_stock) ? (
-                              <button disabled className="w-full flex items-center justify-center gap-1.5 bg-gray-200 text-gray-500 py-2.5 text-xs font-medium tracking-wider uppercase cursor-not-allowed">
-                                <span>Out of Stock</span>
-                              </button>
-                            ) : outfit.shopping_links && Object.keys(outfit.shopping_links).length > 0 ? (
-                              <div>
-                                <button
-                                  onClick={() => setShopOpen(
-                                    shopOpen === `${key}-${outfit.id}` ? null : `${key}-${outfit.id}`
-                                  )}
-                                  className="w-full flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2.5 text-xs font-medium tracking-wider uppercase hover:bg-gray-700 transition-colors"
-                                >
-                                  <FiShoppingBag className="text-xs" />
-                                  <span>{shopOpen === `${key}-${outfit.id}` ? 'Hide' : 'Shop Now'}</span>
-                                </button>
-                                {shopOpen === `${key}-${outfit.id}` && (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: -4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="grid grid-cols-4 gap-1 mt-2"
-                                  >
-                                    {Object.entries(outfit.shopping_links).map(([platform, url]) => {
-                                      const s = SHOP_LABELS[platform];
-                                      if (!s) return null;
-                                      return (
-                                        <a
-                                          key={platform}
-                                          href={url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-center text-xs py-1.5 font-semibold border transition-all hover:text-white truncate"
-                                          style={{ borderColor: s.color, color: s.color }}
-                                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = s.color; e.currentTarget.style.color = '#fff'; }}
-                                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = s.color; }}
-                                        >
-                                          {s.label}
-                                        </a>
-                                      );
-                                    })}
-                                  </motion.div>
-                                )}
-                              </div>
-                            ) : null}
                           </div>
                         </motion.div>
                       ))}

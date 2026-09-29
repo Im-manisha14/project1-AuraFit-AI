@@ -6,8 +6,6 @@ import { FiTrendingUp, FiStar, FiArrowRight, FiShoppingBag } from 'react-icons/f
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const Dashboard = () => {
-  // eslint-disable-next-line no-unused-vars
-  const [trending, setTrending] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,11 +14,9 @@ const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      const trendingRes = await outfitAPI.getTrending(6);
-      setTrending(trendingRes.data.outfits || []);
+      await outfitAPI.getTrending(6);
     } catch (error) {
       console.error('Error loading dashboard:', error);
-      setTrending([]);
     } finally {
       setLoading(false);
     }

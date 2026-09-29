@@ -131,22 +131,67 @@ class RecommendationEngine:
         """Generate personalized outfit recommendations using hybrid filtering."""
         from models.outfit import Outfit, Recommendation
         
-        # Step 0 -- Fetch live data from Shopping APIs
+        # Step 0 -- Live SerpApi Google Shopping + Immersive Stores
         from services.shopping_service import SerpApiShoppingService
         shopping_service = SerpApiShoppingService()
         
-        # Determine compatible colors to pass to search
         compatible_colors = []
         skin_tone = getattr(profile, 'skin_tone', None) if profile else None
         if skin_tone:
             from services.recommendation_engine import SKIN_TONE_COMPATIBLE_COLORS
             compatible_colors = SKIN_TONE_COMPATIBLE_COLORS.get(skin_tone.lower(), [])
-            
-        # This will fetch, normalize, and store/update products in the DB
-        shopping_service.fetch_recommendations(profile, preferences, occasion, compatible_colors)
 
+        viewer_gender = (profile.gender or '').lower() if profile else ''
+        collab_map = self._build_collaborative_map(profile)
+
+        # ── EXCLUSIVE LIVE SHOPPING MODE ─────────────────────────────────
+        # When SERPAPI_KEY is configured, live products are the single source
+        # of truth. Old SQLite mock products are never mixed into live recommendations.
+        if shopping_service.is_configured():
+            live_products = shopping_service.fetch_live_recommendations(
+                profile=profile,
+                preferences=preferences,
+                occasion=occasion,
+                season=season,
+                compatible_colors=compatible_colors,
+                limit=limit
+            )
+            if live_products:
+                scored = []
+                for p in live_products:
+                    outfit_rec = Outfit.query.filter_by(external_id=p['external_id']).first()
+                    if outfit_rec:
+                        scores = self._calculate_scores(
+                            outfit_rec, profile, preferences, occasion, season, collab_map
+                        )
+                        overall = self._calculate_overall_score(scores)
+                        p['match_score'] = overall
+                        p['shopping_links'] = self._generate_shopping_links(outfit_rec, viewer_gender)
+                        scored.append({
+                            'outfit': p,
+                            'scores': scores,
+                            'overall_score': overall
+                        })
+                scored.sort(key=lambda x: x['overall_score'], reverse=True)
+                top = scored[:limit]
+
+                # Fetch similar live recommendations from SerpApi
+                if top:
+                    self.last_similar_recommendations = shopping_service.fetch_similar_live_products(
+                        top[0]['outfit'], profile, limit=4
+                    )
+                else:
+                    self.last_similar_recommendations = []
+
+                return top
+            else:
+                # Live shopping is active but no live items returned: do not leak mock products!
+                self.last_similar_recommendations = []
+                return []
+
+        # ── OFFLINE CATALOG FALLBACK (When SERPAPI_KEY is not configured) ─
         # Step 1 -- Query with DB-level gender + occasion filters.
-        query = Outfit.query
+        query = Outfit.query.filter(Outfit.in_stock == True, Outfit.purchasable == True)
 
         # Gender filter (STRICT -- male or female, never cross-gender)
         if profile and profile.gender:
@@ -157,27 +202,17 @@ class RecommendationEngine:
                     or_(Outfit.gender == gender, Outfit.gender == 'unisex')
                 )
 
-        # Occasion filter (STRICT -- only matching occasion outfits)
+        # Occasion filter
         if occasion and occasion.lower() not in ('all', ''):
             query = query.filter(Outfit.occasion == occasion.lower())
 
         outfits = query.all()
 
-        # Step 2 – Skin-tone pre-filter: remove outfits whose color palette is
-        # incompatible with the user's detected skin tone.  Outfits with no
-        # colors field are kept (cannot be evaluated).  A safety net ensures at
-        # least 3 results are always returned even if the filter is too strict.
-        
-        # Apply skin-tone pre-filter (keep outfits with no colors field to avoid empty results)
-        skin_tone = getattr(profile, 'skin_tone', None) if profile else None
+        # Step 2 – Skin-tone pre-filter
         if skin_tone:
             outfits = self._filter_by_skin_tone(outfits, skin_tone)
 
-        # Step 3 – Collaborative signal map {outfit_id: 0.0–1.0}
-        collab_map = self._build_collaborative_map(profile)
-
         # Step 4 – Score every outfit
-        viewer_gender = (profile.gender or '').lower() if profile else ''
         scored = []
         for outfit in outfits:
             scores = self._calculate_scores(
@@ -185,18 +220,26 @@ class RecommendationEngine:
             )
             overall = self._calculate_overall_score(scores)
             outfit_dict = outfit.to_dict()
-            # Restore original shopping links behavior
             outfit_dict['shopping_links'] = self._generate_shopping_links(outfit, viewer_gender)
             outfit_dict['match_score'] = overall
+            if outfit_dict.get('exact_product_link_available'):
+                outfit_dict['shopping_url'] = outfit.product_url
+            else:
+                outfit_dict['shopping_url'] = None
             scored.append({
                 'outfit':        outfit_dict,
                 'scores':        scores,
                 'overall_score': overall,
             })
 
-        # Step 5 â€“ Rank by overall score, trim to limit
+        # Step 5 – Rank by overall score
         scored.sort(key=lambda x: x['overall_score'], reverse=True)
-        top = scored[:limit]
+        available_scored = [
+            s for s in scored
+            if s['outfit'].get('exact_product_link_available') and s['outfit'].get('in_stock')
+        ]
+        top = available_scored[:limit] if available_scored else scored[:limit]
+        self.last_similar_recommendations = []
 
         # Step 6 â€“ Persist recommendation records (best-effort)
         try:
@@ -472,41 +515,33 @@ class RecommendationEngine:
         return 0.50
 
     def _generate_shopping_links(self, outfit, viewer_gender: str = '') -> Dict[str, str]:
-        """Return gender-aware Indian fashion-platform search URLs for the outfit.
-        Generates real search links on Myntra, Flipkart, Ajio, Amazon, etc.
-        This is the original shopping behavior restored from the project."""
-        from urllib.parse import quote_plus
+        """Return exact, verified direct product links for the outfit.
+        NEVER generates search query URLs (e.g. /s?k= or /search?q=).
+        Preserves exact product identity and direct retailer destinations."""
+        url = getattr(outfit, 'product_url', None) or ''
+        from models.outfit import Outfit
+        if not Outfit.is_exact_product_url(url):
+            return {}
 
-        outfit_gender = (outfit.gender or '').lower()
-        name_lower = (outfit.name or '').lower()
+        url_lower = url.lower()
+        store_lower = (getattr(outfit, 'store', None) or getattr(outfit, 'brand', None) or '').lower()
 
-        # Resolve gender label - don't double-add if name already has it
-        if 'women' in name_lower or "women's" in name_lower:
-            gender_label = ''
-        elif 'men' in name_lower or "men's" in name_lower:
-            gender_label = ''
-        elif outfit_gender == 'female':
-            gender_label = "women's"
-        elif outfit_gender == 'male':
-            gender_label = "men's"
-        elif viewer_gender == 'female':
-            gender_label = "women's"
-        elif viewer_gender == 'male':
-            gender_label = "men's"
+        # Route to exact platform if identified, preserving exact direct URL
+        if 'amazon.' in url_lower or 'amazon' in store_lower:
+            return {'amazon': url}
+        elif 'myntra.' in url_lower or 'myntra' in store_lower:
+            return {'myntra': url}
+        elif 'flipkart.' in url_lower or 'flipkart' in store_lower:
+            return {'flipkart': url}
+        elif 'ajio.' in url_lower or 'ajio' in store_lower:
+            return {'ajio': url}
+        elif 'zara.' in url_lower or 'zara' in store_lower:
+            return {'zara': url}
+        elif 'hm.com' in url_lower or 'h&m' in store_lower:
+            return {'hm': url}
+        elif 'nykaa' in url_lower or 'nykaa' in store_lower:
+            return {'nykaa': url}
+        elif 'meesho' in url_lower or 'meesho' in store_lower:
+            return {'meesho': url}
         else:
-            gender_label = ''
-
-        base_name = outfit.name or ''
-        q_raw = f"{gender_label} {base_name}".strip()
-        q = quote_plus(q_raw)
-
-        return {
-            'myntra':   f'https://www.myntra.com/search?rawQuery={q}',
-            'flipkart': f'https://www.flipkart.com/search?q={q}',
-            'ajio':     f'https://www.ajio.com/search/?text={q}',
-            'meesho':   f'https://www.meesho.com/search?q={q}',
-            'nykaa':    f'https://www.nykaa.com/search/result/?q={q}&root=search',
-            'amazon':   f'https://www.amazon.in/s?k={q}&i=apparel',
-            'hm':       f'https://www2.hm.com/en_in/search-results.html?q={q}',
-            'zara':     f'https://www.zara.com/in/en/search?searchTerm={q}',
-        }
+            return {'direct': url}

@@ -51,6 +51,21 @@ def test_shopping():
     except Exception as e:
         return jsonify({"error": str(e), "status": "FAIL"}), 500
 
+@bp.route('/retailer-status', methods=['GET'])
+def get_retailer_status():
+    """Return status matrix for all integrated retailers."""
+    from services.shopping_service import SerpApiShoppingService, MultiRetailerShoppingManager
+    
+    shopping_service = SerpApiShoppingService()
+    manager = MultiRetailerShoppingManager()
+    status_matrix = manager.get_retailer_status_matrix(serpapi_configured=shopping_service.is_configured())
+    
+    return jsonify({
+        "status": "PASS",
+        "serpapi_configured": shopping_service.is_configured(),
+        "retailers": status_matrix
+    }), 200
+
 @bp.route('/', methods=['GET'])
 @jwt_required()
 def get_outfits():
@@ -100,7 +115,7 @@ def get_outfit(outfit_id):
         
         outfit_dict = outfit.to_dict()
         
-        # Attach shopping links (original behavior)
+        # Attach shopping links (direct exact retailer links)
         from flask_jwt_extended import get_jwt_identity as _get_jwt
         from models.user import UserProfile
         from services.recommendation_engine import RecommendationEngine
@@ -112,6 +127,11 @@ def get_outfit(outfit_id):
             outfit_dict['shopping_links'] = engine._generate_shopping_links(outfit, viewer_gender)
         except Exception:
             outfit_dict['shopping_links'] = {}
+        
+        if outfit_dict.get('exact_product_link_available'):
+            outfit_dict['shopping_url'] = outfit.product_url
+        else:
+            outfit_dict['shopping_url'] = None
         
         return jsonify({'outfit': outfit_dict}), 200
         

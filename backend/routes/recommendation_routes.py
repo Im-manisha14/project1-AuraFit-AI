@@ -41,9 +41,11 @@ def generate_recommendations():
             season=season,
             limit=limit
         )
+        similar = getattr(engine, 'last_similar_recommendations', [])
         
         return jsonify({
             'recommendations': recommendations,
+            'similar_recommendations': similar,
             'count': len(recommendations)
         }), 200
         
@@ -137,8 +139,11 @@ def get_collections():
             result = []
             for o in outfits:
                 d = o.to_dict()
-                # Restore original shopping links behavior - real search URLs on Indian fashion platforms
                 d['shopping_links'] = engine._generate_shopping_links(o, gender)
+                if d.get('exact_product_link_available'):
+                    d['shopping_url'] = o.product_url
+                else:
+                    d['shopping_url'] = None
                 result.append(d)
             return result
 
@@ -373,25 +378,10 @@ def get_similar(outfit_id):
         compatible_colors = main_outfit.colors if main_outfit.colors else []
         occasion = main_outfit.occasion or 'casual'
         
-        # Fetch similar items from shopping API
-        similar_outfits = shopping_service.fetch_recommendations(
-            profile, 
-            preferences, 
-            occasion, 
-            compatible_colors
-        )
-        
-        # Filter out the main outfit and mock ones
-        valid_similar = []
-        for o in similar_outfits:
-            if o.id == main_outfit.id or o.external_id == main_outfit.external_id:
-                continue
-                
-            url = (o.product_url or '').lower()
-            if url and (url.startswith('http://') or url.startswith('https://')) and not any(p in url for p in ['aurafit.store', 'example.com', 'localhost', '127.0.0', 'unsplash', 'placeholder']):
-                valid_similar.append(o.to_dict())
-                
-        return jsonify({'similar': valid_similar[:4]}), 200
+        # Fetch live similar items from SerpApi shopping API
+        outfit_dict = main_outfit.to_dict()
+        similar_outfits = shopping_service.fetch_similar_live_products(outfit_dict, profile, limit=4)
+        return jsonify({'similar': similar_outfits}), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

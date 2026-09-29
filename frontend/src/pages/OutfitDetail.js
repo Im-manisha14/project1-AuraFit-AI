@@ -38,7 +38,6 @@ const OutfitDetail = () => {
   const [similarOutfits, setSimilarOutfits] = useState([]);
   const [loadingSimilar, setLoadingSimilar] = useState(true);
   const [failedImages, setFailedImages] = useState(new Set());
-  const [shopOpen, setShopOpen] = useState(false);
 
   const handleImageError = (id) => {
     setFailedImages((prev) => new Set(prev).add(id));
@@ -168,18 +167,37 @@ const OutfitDetail = () => {
                   <p className="text-xs sm:text-sm text-gray-500 mt-1 capitalize tracking-wide">{outfit.style_type}</p>
                 )}
 
-                {/* Product Meta (Brand, Price) */}
-                <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3">
-                  {outfit.brand && (
+                {/* Product Meta (Retailer, Price, MRP) */}
+                <div className="mt-4 flex flex-col gap-1 border-t border-gray-100 pt-3">
+                  <div className="flex items-center justify-between">
                     <span className="text-sm font-bold text-gray-800 uppercase tracking-widest">
-                      {outfit.brand}
+                      {outfit.retailer || outfit.store || outfit.brand}
                     </span>
-                  )}
-                  {outfit.price && (
-                    <span className="text-xl font-bold text-amber-600">
-                      {new Intl.NumberFormat('en-IN', { style: 'currency', currency: outfit.currency || 'INR' }).format(outfit.price)}
-                    </span>
-                  )}
+                    {outfit.availability && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+                        outfit.availability === 'LIMITED' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
+                      }`}>
+                        {outfit.availability}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    {outfit.price && (
+                      <span className="text-2xl font-bold text-amber-600">
+                        {new Intl.NumberFormat('en-IN', { style: 'currency', currency: outfit.currency || 'INR' }).format(outfit.price)}
+                      </span>
+                    )}
+                    {outfit.original_price && outfit.original_price > outfit.price && (
+                      <span className="text-sm text-gray-400 line-through">
+                        MRP {new Intl.NumberFormat('en-IN', { style: 'currency', currency: outfit.currency || 'INR' }).format(outfit.original_price)}
+                      </span>
+                    )}
+                    {outfit.discount && (
+                      <span className="text-xs font-bold text-green-600">
+                        {outfit.discount}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -263,21 +281,19 @@ const OutfitDetail = () => {
                     <FiShoppingBag />
                     <span>Out of Stock</span>
                   </button>
-                ) : outfit.shopping_links && Object.keys(outfit.shopping_links).length > 0 ? (
+                ) : (outfit.exact_product_link_available && (outfit.shopping_url || outfit.product_url)) ? (
                   <div>
-                    <button
-                      onClick={() => setShopOpen(!shopOpen)}
+                    <a
+                      href={outfit.shopping_url || outfit.product_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="w-full bg-amber-600 text-white py-3 font-bold text-sm tracking-widest uppercase hover:bg-amber-700 transition-colors flex items-center justify-center gap-2"
                     >
                       <FiShoppingBag />
-                      <span>{shopOpen ? 'Hide Links' : 'Shop Now'}</span>
-                    </button>
-                    {shopOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="grid grid-cols-4 gap-1 mt-2"
-                      >
+                      <span>Shop Now</span>
+                    </a>
+                    {outfit.shopping_links && Object.keys(outfit.shopping_links).length > 1 && (
+                      <div className="grid grid-cols-4 gap-1 mt-2">
                         {Object.entries(outfit.shopping_links).map(([platform, url]) => {
                           const s = SHOP_LABELS[platform];
                           if (!s) return null;
@@ -296,10 +312,15 @@ const OutfitDetail = () => {
                             </a>
                           );
                         })}
-                      </motion.div>
+                      </div>
                     )}
                   </div>
-                ) : null}
+                ) : (
+                  <button disabled className="w-full bg-gray-100 text-gray-400 py-3 font-bold text-sm tracking-widest uppercase flex items-center justify-center gap-2 cursor-not-allowed border border-gray-200">
+                    <FiShoppingBag />
+                    <span>Shopping Link Unavailable</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -325,10 +346,10 @@ const OutfitDetail = () => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.1 }}
                     className="bg-white border border-gray-100 hover:border-gray-300 transition-colors cursor-pointer group flex flex-col"
-                    onClick={() => navigate(`/outfits/${item.id}`)}
+                    onClick={() => navigate(`/outfit/${item.id}`)}
                   >
                     <div className="relative aspect-[3/4] bg-gray-100 overflow-hidden">
-                      {item.image_url ? (
+                      {item.image_url && !failedImages.has(item.id) ? (
                         <img
                           src={item.image_url}
                           alt={item.name}
