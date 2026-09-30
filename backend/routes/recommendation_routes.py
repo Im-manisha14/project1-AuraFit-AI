@@ -120,19 +120,17 @@ def get_collections():
 
         # Determine gender from user profile
         profile = UserProfile.query.filter_by(user_id=user_id).first()
-        gender  = (profile.gender or '').lower() if profile else ''
+        from services.shopping_service import ProductValidator
+        raw_gender = (profile.gender or '').lower() if profile else ''
+        gender = ProductValidator.normalize_gender(raw_gender)
 
         engine = RecommendationEngine()
 
         def gender_filter(query):
-            if gender in ('male', 'female'):
-                return query.filter(
-                    or_(
-                        Outfit.gender == gender,
-                        Outfit.gender == 'unisex',
-                        Outfit.gender.is_(None),
-                    )
-                )
+            if gender == 'female':
+                return query.filter(Outfit.gender == 'female', Outfit.category == 'dress')
+            elif gender == 'male':
+                return query.filter(Outfit.gender == 'male', Outfit.category != 'dress')
             return query
 
         def attach_links(outfits):

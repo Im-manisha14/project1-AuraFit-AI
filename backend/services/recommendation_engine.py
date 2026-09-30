@@ -131,8 +131,7 @@ class RecommendationEngine:
         """Generate personalized outfit recommendations using hybrid filtering."""
         from models.outfit import Outfit, Recommendation
         
-        # Step 0 -- Live SerpApi Google Shopping + Immersive Stores
-        from services.shopping_service import SerpApiShoppingService
+        from services.shopping_service import SerpApiShoppingService, ProductValidator
         shopping_service = SerpApiShoppingService()
         
         compatible_colors = []
@@ -141,7 +140,10 @@ class RecommendationEngine:
             from services.recommendation_engine import SKIN_TONE_COMPATIBLE_COLORS
             compatible_colors = SKIN_TONE_COMPATIBLE_COLORS.get(skin_tone.lower(), [])
 
-        viewer_gender = (profile.gender or '').lower() if profile else ''
+        raw_gender = (getattr(profile, 'gender', None) or '').lower() if profile else ''
+        norm_gender = ProductValidator.normalize_gender(raw_gender)
+        viewer_gender = norm_gender if norm_gender != 'unknown' else raw_gender
+        target_category = 'dress' if norm_gender == 'female' else 'clothing'
         collab_map = self._build_collaborative_map(profile)
 
         # ── EXCLUSIVE LIVE SHOPPING MODE ─────────────────────────────────
@@ -154,6 +156,7 @@ class RecommendationEngine:
                 occasion=occasion,
                 season=season,
                 compatible_colors=compatible_colors,
+                target_category=target_category,
                 limit=limit
             )
             if live_products:
@@ -194,13 +197,12 @@ class RecommendationEngine:
         query = Outfit.query.filter(Outfit.in_stock == True, Outfit.purchasable == True)
 
         # Gender filter (STRICT -- male or female, never cross-gender)
-        if profile and profile.gender:
-            gender = profile.gender.lower()
-            if gender in ('male', 'female'):
-                from sqlalchemy import or_
-                query = query.filter(
-                    or_(Outfit.gender == gender, Outfit.gender == 'unisex')
-                )
+        if norm_gender in ('female', 'male'):
+            query = query.filter(Outfit.gender == norm_gender)
+            if norm_gender == 'female':
+                query = query.filter(Outfit.category == 'dress')
+            elif norm_gender == 'male':
+                query = query.filter(Outfit.category != 'dress')
 
         # Occasion filter
         if occasion and occasion.lower() not in ('all', ''):

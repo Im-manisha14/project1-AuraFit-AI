@@ -37,6 +37,7 @@ class Outfit(db.Model):
     trend_score = db.Column(db.Float, default=0.0)
     
     image_url = db.Column(db.String(500))
+    additional_images = db.Column(db.JSON, nullable=True)
     price = db.Column(db.Float)
     currency = db.Column(db.String(10), default='USD')
     brand = db.Column(db.String(100))
@@ -97,6 +98,7 @@ class Outfit(db.Model):
             'comfort_score': self.comfort_score,
             'body_type_compatibility': self.body_type_compatibility,
             'image_url': self.image_url,
+            'additional_images': self.additional_images or [],
             'is_trending': self.is_trending,
             'trend_score': self.trend_score,
             'price': self.price,
