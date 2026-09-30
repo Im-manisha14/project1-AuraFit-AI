@@ -52,7 +52,8 @@ class Outfit(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
     
     @staticmethod
     def is_exact_product_url(url: str) -> bool:
@@ -148,17 +149,16 @@ class UserFeedback(db.Model):
         comments=None,
         **kwargs
     ):
-        super().__init__(
-            user_id=user_id,
-            outfit_id=outfit_id,
-            rating=rating,
-            liked=liked,
-            worn=worn,
-            comfort_feedback=comfort_feedback,
-            style_feedback=style_feedback,
-            comments=comments,
-            **kwargs
-        )
+        self.user_id = user_id
+        self.outfit_id = outfit_id
+        self.rating = rating
+        self.liked = liked
+        self.worn = worn
+        self.comfort_feedback = comfort_feedback
+        self.style_feedback = style_feedback
+        self.comments = comments
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def to_dict(self):
         return {
@@ -210,18 +210,17 @@ class Recommendation(db.Model):
         season=None,
         **kwargs
     ):
-        super().__init__(
-            user_id=user_id,
-            outfit_id=outfit_id,
-            overall_score=overall_score,
-            style_match_score=style_match_score,
-            comfort_score=comfort_score,
-            trend_score=trend_score,
-            body_type_score=body_type_score,
-            occasion=occasion,
-            season=season,
-            **kwargs
-        )
+        self.user_id = user_id
+        self.outfit_id = outfit_id
+        self.overall_score = overall_score
+        self.style_match_score = style_match_score
+        self.comfort_score = comfort_score
+        self.trend_score = trend_score
+        self.body_type_score = body_type_score
+        self.occasion = occasion
+        self.season = season
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def to_dict(self):
         return {
@@ -263,12 +262,11 @@ class OutfitInteraction(db.Model):
         interaction_type='view',
         **kwargs
     ):
-        super().__init__(
-            user_id=user_id,
-            outfit_id=outfit_id,
-            interaction_type=interaction_type,
-            **kwargs
-        )
+        self.user_id = user_id
+        self.outfit_id = outfit_id
+        self.interaction_type = interaction_type
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def to_dict(self):
         return {

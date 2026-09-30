@@ -17,6 +17,14 @@ class User(db.Model):
     preferences = db.relationship('StylePreference', backref='user', uselist=False, cascade='all, delete-orphan')
     feedbacks = db.relationship('UserFeedback', backref='user', cascade='all, delete-orphan', lazy='dynamic')
     
+    def __init__(self, email=None, username=None, password_hash=None, **kwargs):
+        self.email = email
+        self.username = username
+        if password_hash:
+            self.password_hash = password_hash
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
     
@@ -51,6 +59,18 @@ class UserProfile(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    def __init__(self, user_id=None, height=None, weight=None, body_type=None, age=None, gender=None, skin_tone=None, profile_image=None, **kwargs):
+        self.user_id = user_id
+        self.height = height
+        self.weight = weight
+        self.body_type = body_type
+        self.age = age
+        self.gender = gender
+        self.skin_tone = skin_tone
+        self.profile_image = profile_image
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -81,6 +101,16 @@ class StylePreference(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    def __init__(self, user_id=None, preferred_colors=None, preferred_styles=None, avoided_patterns=None, comfort_level=None, preferred_occasions=None, **kwargs):
+        self.user_id = user_id
+        self.preferred_colors = preferred_colors
+        self.preferred_styles = preferred_styles
+        self.avoided_patterns = avoided_patterns
+        self.comfort_level = comfort_level
+        self.preferred_occasions = preferred_occasions
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     def to_dict(self):
         return {
             'id': self.id,
