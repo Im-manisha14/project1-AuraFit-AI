@@ -156,6 +156,103 @@ class ProductValidator:
         return cls.GENDER_NORMALIZATION.get(g, 'unknown')
 
     @classmethod
+    def is_gender_compatible(
+        cls,
+        product: dict,
+        target_gender: str = 'female',
+        target_category: str = 'dress'
+    ) -> Tuple[bool, str, str]:
+        """
+        Implements secondary gender validation with evidence scoring:
+          Strong positive evidence (+3): Explicit gender keyword matching the profile.
+          Strong negative evidence (-10): Explicit opposite-gender keyword.
+          Retailer/category metadata (+2): If API metadata identifies correct gender.
+          Clothing context (+1): If product category is consistent with requested clothing type.
+
+        Final rule:
+          If strong opposite-gender evidence exists -> REJECT
+          Otherwise -> accept if product is relevant to requested clothing type
+
+        Returns (is_compatible, detected_gender, reason)
+        """
+        norm_target = cls.normalize_gender(target_gender)
+        if norm_target not in ('female', 'male'):
+            return True, 'unconstrained', 'Gender unconstrained'
+
+        # Combine text fields normalized to lowercase
+        product_text = " ".join([
+            str(product.get("title", "") or ""),
+            str(product.get("brand", "") or ""),
+            str(product.get("description", "") or product.get("snippet", "") or ""),
+            str(product.get("category", "") or ""),
+            str(product.get("product_type", "") or ""),
+            str(product.get("source", "") or ""),
+            str(product.get("link", "") or product.get("product_link", "") or "")
+        ]).lower()
+
+        cat_meta = str(product.get("category", "") or "").lower()
+
+        has_male_signal = any(bool(re.search(pat, product_text)) for pat in cls.MALE_PATTERNS)
+        has_female_signal = any(bool(re.search(pat, product_text)) for pat in cls.FEMALE_PATTERNS)
+        # Check for false dress compound terms (dress shoes, dress shirt, dress material)
+        is_false_dress = any(bool(re.search(exp, product_text)) for exp in [
+            r'\bdress shoes?\b', r'\bdress shirts?\b', r'\bdress socks?\b', r'\bdress material\b',
+            r'\bdressing (table|mirror)\b', r'\bfancy dress\b'
+        ])
+        has_female_garment = any(bool(re.search(pat, product_text)) for pat in cls.FEMALE_GARMENTS)
+        has_male_garment = any(bool(re.search(pat, product_text)) for pat in cls.MALE_GARMENTS)
+        if is_false_dress and not any(bool(re.search(pat, product_text)) for pat in [r'\bgown\b', r'\bskirt\b', r'\bkurti\b', r'\blehenga\b', r'\bsaree\b']):
+            has_female_garment = False
+
+        if norm_target == 'female':
+            detected_gender = 'unknown'
+            if has_male_signal or has_male_garment:
+                detected_gender = 'male'
+                return False, 'male', 'opposite gender (male) indicator found'
+
+            score = 0
+            if has_female_signal:
+                score += 3
+                detected_gender = 'female'
+            if any(k in cat_meta for k in ['women', 'woman', 'female', 'ladies', 'girl']):
+                score += 2
+                detected_gender = 'female'
+            if has_female_garment:
+                score += 1
+                if detected_gender == 'unknown':
+                    detected_gender = 'female'
+
+            if score > 0:
+                return True, detected_gender, f'valid female product (score: {score})'
+
+            return False, 'unknown', 'no female indicators or dress context found'
+
+        elif norm_target == 'male':
+            detected_gender = 'unknown'
+            if has_female_signal or has_female_garment:
+                detected_gender = 'female'
+                return False, 'female', 'opposite gender (female) indicator found'
+
+            score = 0
+            if has_male_signal:
+                score += 3
+                detected_gender = 'male'
+            if any(k in cat_meta for k in ['men', 'man', 'male', 'menswear', 'boy']):
+                score += 2
+                detected_gender = 'male'
+            if has_male_garment or any(bool(re.search(p, product_text)) for p in cls.MENSWEAR_ACCEPTED_PATTERNS):
+                score += 1
+                if detected_gender == 'unknown':
+                    detected_gender = 'male'
+
+            if score > 0 or has_male_garment:
+                return True, detected_gender, f'valid male product (score: {score})'
+
+            return False, 'unknown', 'no male indicators or menswear context found'
+
+        return False, 'unknown', 'invalid gender matching'
+
+    @classmethod
     def validate_gender(
         cls,
         title: str,
@@ -165,38 +262,46 @@ class ProductValidator:
         metadata: Optional[dict] = None,
         target_gender: str = 'female'
     ) -> Tuple[bool, str]:
-        """
-        Multi-signal gender validation using title, description, category, URL, and metadata.
-        Returns (is_valid, reason).
-        """
-        norm_target = cls.normalize_gender(target_gender)
-        if norm_target not in ('female', 'male'):
-            return True, 'Gender unconstrained'
+        """Backwards-compatible wrapper around is_gender_compatible."""
+        prod = {
+            'title': title,
+            'description': description,
+            'category': category,
+            'link': url
+        }
+        if metadata:
+            prod.update(metadata)
+        ok, _, reason = cls.is_gender_compatible(prod, target_gender=target_gender)
+        return ok, reason
 
-        # Combine text signals
-        meta_str = " ".join(str(v) for v in (metadata or {}).values() if isinstance(v, (str, int, float)))
-        combined_text = f"{title} {description} {category} {url} {meta_str}".lower()
-
-        has_male_signal = any(bool(re.search(pat, combined_text)) for pat in cls.MALE_PATTERNS)
-        has_female_signal = any(bool(re.search(pat, combined_text)) for pat in cls.FEMALE_PATTERNS)
-        has_female_garment = any(bool(re.search(pat, combined_text)) for pat in cls.FEMALE_GARMENTS)
-        has_male_garment = any(bool(re.search(pat, combined_text)) for pat in cls.MALE_GARMENTS)
-
-        if norm_target == 'female':
-            if has_male_signal or has_male_garment:
-                return False, 'Rejected: male indicators found in product for female profile'
-            if has_female_signal or has_female_garment:
-                return True, 'Valid female product'
-            return False, 'Rejected: unknown or unverified gender product for female profile'
-
-        if norm_target == 'male':
-            if has_female_signal or has_female_garment:
-                return False, 'Rejected: female indicators found in product for male profile'
-            if has_male_signal or has_male_garment or any(bool(re.search(p, combined_text)) for p in cls.MENSWEAR_ACCEPTED_PATTERNS):
-                return True, 'Valid male product'
-            return False, 'Rejected: unknown or unverified gender product for male profile'
-
-        return False, 'Rejected: invalid gender matching'
+    @classmethod
+    def detect_category(cls, title: str, description: str = '', category_field: str = '') -> str:
+        """Detect product category from title, description, and metadata for structured logging."""
+        combined = f"{title} {description} {category_field}".lower()
+        if any(bool(re.search(dp, combined)) for dp in cls.DRESS_REQUIRED_PATTERNS):
+            for exp in cls.EXCLUDED_DRESS_PATTERNS:
+                if exp == r'\b(shirts?)\b' and 'shirt dress' in combined:
+                    continue
+                if re.search(exp, combined):
+                    return 'non-dress accessory/clothing'
+            return 'dress'
+        if any(bool(re.search(p, combined)) for p in [r'\b(shoes?|sneakers?|sandals?|heels?|boots?|loafers?|footwear)\b']):
+            return 'shoes/footwear'
+        if any(bool(re.search(p, combined)) for p in [r'\b(t-shirts?|tshirt|tee)\b']):
+            return 't-shirt'
+        if any(bool(re.search(p, combined)) for p in [r'\b(shirts?)\b']):
+            return 'shirt'
+        if any(bool(re.search(p, combined)) for p in [r'\b(trousers?|pants?|jeans?|chinos?|shorts?)\b']):
+            return 'pants/trousers'
+        if any(bool(re.search(p, combined)) for p in [r'\b(suits?|blazers?)\b']):
+            return 'suit/blazer'
+        if any(bool(re.search(p, combined)) for p in [r'\b(handbags?|bags?|purse|clutch|wallet|tote)\b']):
+            return 'handbag'
+        if any(bool(re.search(p, combined)) for p in [r'\b(watches?|smartwatch|earrings?|necklaces?|bracelets?|jewelry)\b']):
+            return 'jewelry/accessory'
+        if any(bool(re.search(p, combined)) for p in [r'\b(skirts?)\b']):
+            return 'skirt'
+        return 'general clothing'
 
     @classmethod
     def validate_category(
@@ -221,24 +326,24 @@ class ProductValidator:
                 if exp == r'\b(shirts?)\b' and 'shirt dress' in t:
                     continue
                 if re.search(exp, t):
-                    return False, f'Rejected: non-dress product category matched ({exp})'
+                    return False, f'non-dress product category matched ({exp})'
 
             # Must match at least one approved dress keyword
             matched_dress = any(bool(re.search(dp, t)) for dp in cls.DRESS_REQUIRED_PATTERNS)
             if matched_dress:
-                return True, 'Valid dress category'
-            return False, 'Rejected: does not contain an approved dress keyword'
+                return True, 'valid dress category'
+            return False, 'does not contain an approved dress keyword'
 
         elif norm_gender == 'male':
             for exp in cls.MENSWEAR_EXCLUDED_PATTERNS:
                 if re.search(exp, t):
-                    return False, f'Rejected: non-menswear or excluded category matched ({exp})'
+                    return False, f'non-menswear or excluded category matched ({exp})'
             matched_menswear = any(bool(re.search(mp, t)) for mp in cls.MENSWEAR_ACCEPTED_PATTERNS)
             if matched_menswear:
-                return True, 'Valid menswear category'
-            return False, 'Rejected: does not match approved menswear categories'
+                return True, 'valid menswear category'
+            return False, 'does not match approved menswear categories'
 
-        return True, 'Category unconstrained'
+        return True, 'category unconstrained'
 
     @classmethod
     def validate_image(cls, image_url: Optional[str]) -> Tuple[bool, str]:
@@ -252,6 +357,30 @@ class ProductValidator:
         if any(bad in url_clean for bad in ['aurafit.store', 'example.com', 'placeholder', 'unsplash', 'default_avatar', 'no-image']):
             return False, 'Disallowed placeholder or mock image domain'
         return True, 'Valid authentic image'
+
+
+def log_filter_decision(
+    title: str,
+    retailer: str,
+    detected_gender: str,
+    requested_gender: str,
+    detected_category: str,
+    requested_category: str,
+    decision: str,
+    reason: str
+):
+    """Outputs standardized structured debug logging as required by specification."""
+    print(
+        f"\n[SHOPPING FILTER]\n"
+        f"Title: {title}\n"
+        f"Retailer: {retailer}\n"
+        f"Detected Gender: {detected_gender}\n"
+        f"Requested Gender: {requested_gender}\n"
+        f"Detected Category: {detected_category}\n"
+        f"Requested Category: {requested_category}\n"
+        f"Decision: {decision}\n"
+        f"Reason: {reason}"
+    )
 
 
 # ==============================================================================
@@ -579,7 +708,29 @@ class SerpApiShoppingService:
             print(f"[ShoppingService] SerpApi returned {len(shopping_results)} items for '{query}'")
         except Exception as e:
             print(f"[ShoppingService] Failed to query SerpApi: {e}")
-            return []
+            from models.outfit import Outfit
+            live_db_outfits = Outfit.query.filter_by(source='serpapi').all()
+            if live_db_outfits:
+                print(f"[ShoppingService] Fallback to {len(live_db_outfits)} persisted live SerpApi items under strict validation")
+                shopping_results = [
+                    {
+                        'title': o.name,
+                        'thumbnail': o.image_url,
+                        'thumbnails': o.additional_images or [],
+                        'extracted_price': o.price,
+                        'price': f"₹{int(o.price)}" if o.price else None,
+                        'extracted_old_price': o.original_price,
+                        'source': o.store or o.brand or 'Online Store',
+                        'brand': o.brand,
+                        'link': o.product_url,
+                        'product_id': (o.external_id or '').replace('serpapi_', '').replace('serpapi_sim_', ''),
+                        'delivery': 'In Stock',
+                        'category': o.category
+                    }
+                    for o in live_db_outfits
+                ]
+            else:
+                return []
 
         # Diagnostics counters
         stats = {
@@ -600,8 +751,11 @@ class SerpApiShoppingService:
             title = (it.get('title') or '').strip()
             thumbnail = (it.get('thumbnail') or '').strip()
             price = it.get('extracted_price')
-
             # Basic validation
+            raw_source = it.get('source') or 'Online Retailer'
+            pre_retailer = self.clean_retailer_name(raw_source)
+            det_cat = ProductValidator.detect_category(title, it.get('snippet', ''), it.get('category', ''))
+
             if not title or not thumbnail or price is None:
                 stats['rejected_other'] += 1
                 continue
@@ -610,19 +764,36 @@ class SerpApiShoppingService:
             img_ok, img_reason = ProductValidator.validate_image(thumbnail)
             if not img_ok:
                 stats['rejected_image'] += 1
+                log_filter_decision(
+                    title=title,
+                    retailer=pre_retailer,
+                    detected_gender="unknown",
+                    requested_gender=norm_gender,
+                    detected_category=det_cat,
+                    requested_category=target_category,
+                    decision="REJECT",
+                    reason=f"invalid image ({img_reason})"
+                )
                 continue
 
-            # 2. STRICT GENDER VALIDATION
-            gender_ok, g_reason = ProductValidator.validate_gender(
-                title=title,
-                description=it.get('snippet', '') or it.get('description', ''),
-                category=it.get('category', ''),
-                url=it.get('link', '') or it.get('product_link', ''),
-                metadata=it,
-                target_gender=norm_gender
+            # 2. STRICT GENDER VALIDATION VIA SCORING
+            gender_ok, det_gender, g_reason = ProductValidator.is_gender_compatible(
+                product=it,
+                target_gender=norm_gender,
+                target_category=target_category
             )
             if not gender_ok:
                 stats['rejected_gender'] += 1
+                log_filter_decision(
+                    title=title,
+                    retailer=pre_retailer,
+                    detected_gender=det_gender,
+                    requested_gender=norm_gender,
+                    detected_category=det_cat,
+                    requested_category=target_category,
+                    decision="REJECT",
+                    reason=g_reason
+                )
                 continue
 
             # 3. STRICT CATEGORY VALIDATION
@@ -635,6 +806,16 @@ class SerpApiShoppingService:
             )
             if not cat_ok:
                 stats['rejected_category'] += 1
+                log_filter_decision(
+                    title=title,
+                    retailer=pre_retailer,
+                    detected_gender=det_gender,
+                    requested_gender=norm_gender,
+                    detected_category=det_cat,
+                    requested_category=target_category,
+                    decision="REJECT",
+                    reason=c_reason
+                )
                 continue
 
             # Title key for deduplicating identical items across sizes/SKUs
@@ -726,6 +907,17 @@ class SerpApiShoppingService:
                 'direct_url': direct_url,
                 'ext_id': ext_id
             })
+
+            log_filter_decision(
+                title=title,
+                retailer=retailer_name,
+                detected_gender=det_gender,
+                requested_gender=norm_gender,
+                detected_category=det_cat,
+                requested_category=target_category,
+                decision="ACCEPT",
+                reason=f"valid {norm_gender} {target_category} with direct retailer URL"
+            )
 
             # Check if we have enough diverse candidates
             if len(candidates) >= limit and len(retailer_candidate_counts) >= 3:
@@ -867,10 +1059,32 @@ class SerpApiShoppingService:
         try:
             resp = requests.get(self.base_url, params=params, timeout=25)
             if not resp.ok:
-                return []
+                raise Exception(f"HTTP {resp.status_code}")
             results = resp.json().get('shopping_results', [])
-        except Exception:
-            return []
+        except Exception as e:
+            print(f"[ShoppingService] Similar query error: {e}")
+            from models.outfit import Outfit
+            live_db_outfits = Outfit.query.filter_by(source='serpapi').all()
+            if live_db_outfits:
+                results = [
+                    {
+                        'title': o.name,
+                        'thumbnail': o.image_url,
+                        'thumbnails': o.additional_images or [],
+                        'extracted_price': o.price,
+                        'price': f"₹{int(o.price)}" if o.price else None,
+                        'extracted_old_price': o.original_price,
+                        'source': o.store or o.brand or 'Online Store',
+                        'brand': o.brand,
+                        'link': o.product_url,
+                        'product_id': (o.external_id or '').replace('serpapi_', '').replace('serpapi_sim_', ''),
+                        'delivery': 'In Stock',
+                        'category': o.category
+                    }
+                    for o in live_db_outfits
+                ]
+            else:
+                results = []
 
         similar_items = []
         seen_sim_urls = set()
@@ -880,30 +1094,51 @@ class SerpApiShoppingService:
             title = (it.get('title') or '').strip()
             thumbnail = (it.get('thumbnail') or '').strip()
             price = it.get('extracted_price')
+            raw_source = it.get('source') or 'Online Store'
+            pre_retailer = self.clean_retailer_name(raw_source)
+            det_cat = ProductValidator.detect_category(title, it.get('snippet', ''), it.get('category', ''))
+
             if not title or not thumbnail or price is None:
                 continue
             if it.get('product_id') == main_product.get('external_id'):
                 continue
 
             # 1. STRICT IMAGE VALIDATION
-            img_ok, _ = ProductValidator.validate_image(thumbnail)
+            img_ok, img_reason = ProductValidator.validate_image(thumbnail)
             if not img_ok:
+                log_filter_decision(
+                    title=title,
+                    retailer=pre_retailer,
+                    detected_gender="unknown",
+                    requested_gender=norm_gender,
+                    detected_category=det_cat,
+                    requested_category=target_category,
+                    decision="REJECT",
+                    reason=f"invalid image ({img_reason})"
+                )
                 continue
 
-            # 2. STRICT GENDER VALIDATION
-            gender_ok, _ = ProductValidator.validate_gender(
-                title=title,
-                description=it.get('snippet', '') or it.get('description', ''),
-                category=it.get('category', ''),
-                url=it.get('link', '') or it.get('product_link', ''),
-                metadata=it,
-                target_gender=norm_gender
+            # 2. STRICT GENDER VALIDATION VIA SCORING
+            gender_ok, det_gender, g_reason = ProductValidator.is_gender_compatible(
+                product=it,
+                target_gender=norm_gender,
+                target_category=target_category
             )
             if not gender_ok:
+                log_filter_decision(
+                    title=title,
+                    retailer=pre_retailer,
+                    detected_gender=det_gender,
+                    requested_gender=norm_gender,
+                    detected_category=det_cat,
+                    requested_category=target_category,
+                    decision="REJECT",
+                    reason=g_reason
+                )
                 continue
 
             # 3. STRICT CATEGORY VALIDATION
-            cat_ok, _ = ProductValidator.validate_category(
+            cat_ok, c_reason = ProductValidator.validate_category(
                 title=title,
                 description=it.get('snippet', '') or it.get('description', ''),
                 category=it.get('category', ''),
@@ -911,6 +1146,16 @@ class SerpApiShoppingService:
                 target_gender=norm_gender
             )
             if not cat_ok:
+                log_filter_decision(
+                    title=title,
+                    retailer=pre_retailer,
+                    detected_gender=det_gender,
+                    requested_gender=norm_gender,
+                    detected_category=det_cat,
+                    requested_category=target_category,
+                    decision="REJECT",
+                    reason=c_reason
+                )
                 continue
 
             pre_retailer = self.clean_retailer_name(it.get('source'))
@@ -975,6 +1220,17 @@ class SerpApiShoppingService:
             sim_dict['title'] = outfit_record.name
             sim_dict['shopping_links'] = { retailer_name.lower().replace(' ', ''): direct_url }
             similar_items.append(sim_dict)
+
+            log_filter_decision(
+                title=title,
+                retailer=retailer_name,
+                detected_gender=det_gender,
+                requested_gender=norm_gender,
+                detected_category=det_cat,
+                requested_category=target_category,
+                decision="ACCEPT",
+                reason=f"valid similar {norm_gender} {target_category} with direct retailer URL"
+            )
 
             if len(similar_items) >= limit:
                 break

@@ -116,21 +116,12 @@ def get_outfit(outfit_id):
         outfit_dict = outfit.to_dict()
         
         # Attach shopping links (direct exact retailer links)
-        from flask_jwt_extended import get_jwt_identity as _get_jwt
-        from models.user import UserProfile
-        from services.recommendation_engine import RecommendationEngine
-        try:
-            user_id = int(_get_jwt())
-            profile = UserProfile.query.filter_by(user_id=user_id).first()
-            viewer_gender = (profile.gender or '').lower() if profile else ''
-            engine = RecommendationEngine()
-            outfit_dict['shopping_links'] = engine._generate_shopping_links(outfit, viewer_gender)
-        except Exception:
-            outfit_dict['shopping_links'] = {}
-        
-        if outfit_dict.get('exact_product_link_available'):
+        if outfit.product_url and outfit_dict.get('exact_product_link_available'):
+            retailer_key = (outfit.store or outfit.brand or 'store').lower().replace(' ', '')
+            outfit_dict['shopping_links'] = { retailer_key: outfit.product_url }
             outfit_dict['shopping_url'] = outfit.product_url
         else:
+            outfit_dict['shopping_links'] = {}
             outfit_dict['shopping_url'] = None
         
         return jsonify({'outfit': outfit_dict}), 200
