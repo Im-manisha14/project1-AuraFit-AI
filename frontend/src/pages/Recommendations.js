@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { recommendationAPI, userAPI } from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiUser, FiArrowRight, FiShoppingBag } from 'react-icons/fi';
+import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiUser, FiArrowRight, FiShoppingBag, FiDollarSign, FiTag } from 'react-icons/fi';
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const COLLECTION_META = {
@@ -52,8 +52,13 @@ const Recommendations = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const autoGenerateRef = useRef(location.state?.autoGenerate || false);
-  const [recommendations, setRecommendations] = useState([]);
-  const [similarRecommendations, setSimilarRecommendations] = useState([]);
+  const [rawRecommendations, setRawRecommendations] = useState([]);
+  const [rawSimilarRecommendations, setRawSimilarRecommendations] = useState([]);
+  const [hasGenerated, setHasGenerated] = useState(false);
+  const [priceRange, setPriceRange] = useState('all');
+  const [customMin, setCustomMin] = useState('');
+  const [customMax, setCustomMax] = useState('');
+  const [selectedRetailer, setSelectedRetailer] = useState('all');
   const [loading, setLoading] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileComplete, setProfileComplete] = useState(true);
@@ -61,11 +66,73 @@ const Recommendations = () => {
   const [filters, setFilters] = useState({
     occasion: 'casual',
     season: 'all',
-    limit: 10,
+    limit: 25,
   });
   const [collections, setCollections] = useState({});
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [failedImages, setFailedImages] = useState(new Set());
+
+  const matchesPrice = (price, range, minVal, maxVal) => {
+    if (range === 'all') return true;
+    if (price == null || isNaN(price)) return false;
+    const p = Number(price);
+    if (range === 'under_500') return p <= 500;
+    if (range === '500_1000') return p >= 500 && p <= 1000;
+    if (range === '1000_2000') return p >= 1000 && p <= 2000;
+    if (range === '1000_2500') return p >= 1000 && p <= 2500;
+    if (range === '2000_3000') return p >= 2000 && p <= 3000;
+    if (range === '2500_5000') return p >= 2500 && p <= 5000;
+    if (range === '3000_5000') return p >= 3000 && p <= 5000;
+    if (range === '5000_10000') return p >= 5000 && p <= 10000;
+    if (range === '5000_plus') return p >= 5000;
+    if (range === 'above_10000') return p >= 10000;
+    if (range === 'custom') {
+      const min = minVal !== '' && !isNaN(minVal) ? Number(minVal) : null;
+      const max = maxVal !== '' && !isNaN(maxVal) ? Number(maxVal) : null;
+      if (min !== null && p < min) return false;
+      if (max !== null && p > max) return false;
+      return true;
+    }
+    return true;
+  };
+
+  const matchesRetailer = (outfitRetailer, selRetailer) => {
+    if (!selRetailer || selRetailer === 'all') return true;
+    const r = (outfitRetailer || '').toLowerCase();
+    return r.includes(selRetailer.toLowerCase());
+  };
+
+  const availableRetailers = useMemo(() => {
+    const set = new Set();
+    rawRecommendations.forEach(rec => {
+      const r = rec.outfit?.retailer || rec.outfit?.store || rec.outfit?.brand;
+      if (r && r.trim() && r.toLowerCase() !== 'aurafit official') {
+        set.add(r.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [rawRecommendations]);
+
+  const recommendations = useMemo(() => {
+    return rawRecommendations.filter(rec => {
+      const outfit = rec.outfit;
+      if (!outfit) return false;
+      const pOk = matchesPrice(outfit.price, priceRange, customMin, customMax);
+      const r = outfit.retailer || outfit.store || outfit.brand;
+      const retOk = matchesRetailer(r, selectedRetailer);
+      return pOk && retOk;
+    });
+  }, [rawRecommendations, priceRange, customMin, customMax, selectedRetailer]);
+
+  const similarRecommendations = useMemo(() => {
+    return rawSimilarRecommendations.filter(outfit => {
+      if (!outfit) return false;
+      const pOk = matchesPrice(outfit.price, priceRange, customMin, customMax);
+      const r = outfit.retailer || outfit.store || outfit.brand;
+      const retOk = matchesRetailer(r, selectedRetailer);
+      return pOk && retOk;
+    });
+  }, [rawSimilarRecommendations, priceRange, customMin, customMax, selectedRetailer]);
 
 
   useEffect(() => {
@@ -102,10 +169,15 @@ const Recommendations = () => {
       // Auto-generate if we just arrived from profile save
       if (autoGenerateRef.current && isComplete) {
         autoGenerateRef.current = false;
+        setRawRecommendations([]);
+        setRawSimilarRecommendations([]);
+        setFailedImages(new Set());
         setLoading(true);
         try {
-          const response = await recommendationAPI.generate({ occasion: 'casual', season: 'all', limit: 10 });
-          setRecommendations(response.data.recommendations || []);
+          const response = await recommendationAPI.generate({ occasion: 'casual', season: 'all', limit: 25, results: 25 });
+          setRawRecommendations(response.data.recommendations || []);
+          setRawSimilarRecommendations(response.data.similar_recommendations || []);
+          setHasGenerated(true);
           loadCollections();
         } catch (err) {
           console.error('Auto-generate error:', err);
@@ -136,11 +208,23 @@ const Recommendations = () => {
       return;
     }
 
+    setRawRecommendations([]);
+    setRawSimilarRecommendations([]);
+    setFailedImages(new Set());
     setLoading(true);
     try {
-      const response = await recommendationAPI.generate(filters);
-      setRecommendations(response.data.recommendations || []);
-      setSimilarRecommendations(response.data.similar_recommendations || []);
+      const payload = {
+        ...filters,
+        results: Number(filters.limit || 25),
+        price_range: priceRange !== 'custom' ? priceRange : undefined,
+        min_price: priceRange === 'custom' && customMin !== '' ? Number(customMin) : undefined,
+        max_price: priceRange === 'custom' && customMax !== '' ? Number(customMax) : undefined,
+        retailer: selectedRetailer !== 'all' ? selectedRetailer : undefined,
+      };
+      const response = await recommendationAPI.generate(payload);
+      setRawRecommendations(response.data.recommendations || []);
+      setRawSimilarRecommendations(response.data.similar_recommendations || []);
+      setHasGenerated(true);
       loadCollections();
     } catch (error) {
       console.error('Error generating recommendations:', error);
@@ -282,12 +366,101 @@ const Recommendations = () => {
                 onChange={handleFilterChange}
                 className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
               >
-                <option value="5">5</option>
-                <option value="10">10</option>
                 <option value="15">15</option>
                 <option value="20">20</option>
+                <option value="25">25</option>
+                <option value="30">30</option>
+                <option value="40">40</option>
               </select>
             </div>
+          </div>
+
+          {/* Shopping Price & Retailer Filters */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-5 md:gap-6 mb-6 sm:mb-8 pt-4 border-t border-gray-100">
+            <div>
+              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
+                <FiDollarSign className="text-amber-600 text-sm sm:text-base" />
+                <span>Price Range</span>
+              </label>
+              <select
+                id="price-range-filter"
+                value={priceRange}
+                onChange={(e) => setPriceRange(e.target.value)}
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
+              >
+                <option value="all">All Prices</option>
+                <option value="under_500">Under ₹500</option>
+                <option value="500_1000">₹500 – ₹1,000</option>
+                <option value="1000_2000">₹1,000 – ₹2,000</option>
+                <option value="1000_2500">₹1,000 – ₹2,500</option>
+                <option value="2000_3000">₹2,000 – ₹3,000</option>
+                <option value="2500_5000">₹2,500 – ₹5,000</option>
+                <option value="3000_5000">₹3,000 – ₹5,000</option>
+                <option value="5000_10000">₹5,000 – ₹10,000</option>
+                <option value="5000_plus">₹5,000+</option>
+                <option value="above_10000">Above ₹10,000</option>
+                <option value="custom">Custom Price Range</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
+                <FiTag className="text-amber-600 text-sm sm:text-base" />
+                <span>Retailer</span>
+              </label>
+              <select
+                id="retailer-filter"
+                value={selectedRetailer}
+                onChange={(e) => setSelectedRetailer(e.target.value)}
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
+              >
+                <option value="all">All Retailers</option>
+                {availableRetailers.map((ret) => (
+                  <option key={ret} value={ret}>
+                    {ret}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {priceRange === 'custom' ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase truncate">
+                    Min Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    id="min-price-input"
+                    placeholder="Min ₹"
+                    value={customMin}
+                    onChange={(e) => setCustomMin(e.target.value)}
+                    className="w-full px-3 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase truncate">
+                    Max Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    id="max-price-input"
+                    placeholder="Max ₹"
+                    value={customMax}
+                    onChange={(e) => setCustomMax(e.target.value)}
+                    className="w-full px-3 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-end pb-2 text-xs text-gray-500 font-light">
+                {rawRecommendations.length > 0 && (
+                  <span>
+                    Showing <strong className="font-semibold text-gray-800">{recommendations.length}</strong> of {rawRecommendations.length} live products
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <motion.button
             whileHover={{ scale: 1.02 }}
@@ -643,10 +816,34 @@ const Recommendations = () => {
             className="bg-white border border-gray-200 p-16 text-center"
           >
             <HiOutlineSparkles className="text-7xl text-amber-500 mx-auto mb-6" />
-            <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">Live shopping results are temporarily unavailable</h3>
-            <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
-              Please adjust your filters and try generating again.
-            </p>
+            {rawRecommendations.length > 0 && (priceRange !== 'all' || customMin || customMax) && selectedRetailer === 'all' ? (
+              <>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">
+                  No live products found in this price range.
+                </h3>
+                <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
+                  Try increasing your price range.
+                </p>
+              </>
+            ) : hasGenerated ? (
+              <>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">
+                  No live products match your selected filters.
+                </h3>
+                <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
+                  Try widening your price range or changing the retailer.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">
+                  Ready to Discover Live Looks?
+                </h3>
+                <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
+                  Select your preferences above and click Generate Recommendations to explore live shopping products.
+                </p>
+              </>
+            )}
           </motion.div>
         )}
 

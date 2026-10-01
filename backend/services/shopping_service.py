@@ -5,6 +5,7 @@ import urllib.parse
 import hashlib
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from extensions import db
 from models.outfit import Outfit
 
@@ -127,6 +128,7 @@ class ProductValidator:
         r'\b(trousers?|pants?|jeans?|shorts?|leggings?|trackpants?)\b',
         r'\b(skirts?)\b',
         r'\b(bras?|panties|lingerie|underwear)\b',
+        r'\b(towels?|bath\s*towel|bathrobe|nighty|nightwear|sleepwear|bath)\b',
         r'\b(furniture|curtains?|bedsheets?|cosmetics?|makeup|perfume|lipstick)\b',
     ]
 
@@ -147,6 +149,11 @@ class ProductValidator:
         r'\b(furniture|cosmetics?|perfume)\b',
     ]
 
+    # Unisex patterns
+    UNISEX_PATTERNS = [
+        r"\bunisex\b", r"\ball-gender\b", r"\bgender-neutral\b",
+    ]
+
     @classmethod
     def normalize_gender(cls, raw_gender: Optional[str]) -> str:
         """Normalize raw gender input to 'female', 'male', or 'unknown'."""
@@ -163,92 +170,60 @@ class ProductValidator:
         target_category: str = 'dress'
     ) -> Tuple[bool, str, str]:
         """
-        Implements secondary gender validation with evidence scoring:
-          Strong positive evidence (+3): Explicit gender keyword matching the profile.
-          Strong negative evidence (-10): Explicit opposite-gender keyword.
-          Retailer/category metadata (+2): If API metadata identifies correct gender.
-          Clothing context (+1): If product category is consistent with requested clothing type.
-
-        Final rule:
-          If strong opposite-gender evidence exists -> REJECT
-          Otherwise -> accept if product is relevant to requested clothing type
-
+        Validates product gender against AuraFit profile:
+          If profile = Female:
+            Allow: 'female', 'unisex'
+            Reject: 'male'
+            If 'unknown': accept only if category relevance (e.g. dress) matches
+          If profile = Male:
+            Allow: 'male', 'unisex'
+            Reject: 'female'
+            If 'unknown': accept only if category relevance (e.g. menswear) matches
         Returns (is_compatible, detected_gender, reason)
         """
         norm_target = cls.normalize_gender(target_gender)
         if norm_target not in ('female', 'male'):
             return True, 'unconstrained', 'Gender unconstrained'
 
-        # Combine text fields normalized to lowercase
-        product_text = " ".join([
-            str(product.get("title", "") or ""),
-            str(product.get("brand", "") or ""),
-            str(product.get("description", "") or product.get("snippet", "") or ""),
-            str(product.get("category", "") or ""),
-            str(product.get("product_type", "") or ""),
-            str(product.get("source", "") or ""),
-            str(product.get("link", "") or product.get("product_link", "") or "")
-        ]).lower()
-
-        cat_meta = str(product.get("category", "") or "").lower()
-
-        has_male_signal = any(bool(re.search(pat, product_text)) for pat in cls.MALE_PATTERNS)
-        has_female_signal = any(bool(re.search(pat, product_text)) for pat in cls.FEMALE_PATTERNS)
-        # Check for false dress compound terms (dress shoes, dress shirt, dress material)
-        is_false_dress = any(bool(re.search(exp, product_text)) for exp in [
-            r'\bdress shoes?\b', r'\bdress shirts?\b', r'\bdress socks?\b', r'\bdress material\b',
-            r'\bdressing (table|mirror)\b', r'\bfancy dress\b'
-        ])
-        has_female_garment = any(bool(re.search(pat, product_text)) for pat in cls.FEMALE_GARMENTS)
-        has_male_garment = any(bool(re.search(pat, product_text)) for pat in cls.MALE_GARMENTS)
-        if is_false_dress and not any(bool(re.search(pat, product_text)) for pat in [r'\bgown\b', r'\bskirt\b', r'\bkurti\b', r'\blehenga\b', r'\bsaree\b']):
-            has_female_garment = False
+        det_gender = detect_product_gender(product)
 
         if norm_target == 'female':
-            detected_gender = 'unknown'
-            if has_male_signal or has_male_garment:
-                detected_gender = 'male'
-                return False, 'male', 'opposite gender (male) indicator found'
-
-            score = 0
-            if has_female_signal:
-                score += 3
-                detected_gender = 'female'
-            if any(k in cat_meta for k in ['women', 'woman', 'female', 'ladies', 'girl']):
-                score += 2
-                detected_gender = 'female'
-            if has_female_garment:
-                score += 1
-                if detected_gender == 'unknown':
-                    detected_gender = 'female'
-
-            if score > 0:
-                return True, detected_gender, f'valid female product (score: {score})'
-
-            return False, 'unknown', 'no female indicators or dress context found'
+            if det_gender == 'male':
+                return False, 'male', 'rejected opposite gender (male) product'
+            elif det_gender == 'female':
+                return True, 'female', 'valid female product'
+            elif det_gender == 'unisex':
+                return True, 'unisex', 'valid unisex product'
+            else: # 'unknown'
+                cat_ok, c_msg = cls.validate_category(
+                    title=product.get('title', ''),
+                    description=product.get('description', '') or product.get('snippet', ''),
+                    category=product.get('category', ''),
+                    target_category=target_category,
+                    target_gender=norm_target
+                )
+                if cat_ok:
+                    return True, 'unknown', 'accepted via category relevance'
+                return False, 'unknown', f'no female evidence and {c_msg}'
 
         elif norm_target == 'male':
-            detected_gender = 'unknown'
-            if has_female_signal or has_female_garment:
-                detected_gender = 'female'
-                return False, 'female', 'opposite gender (female) indicator found'
-
-            score = 0
-            if has_male_signal:
-                score += 3
-                detected_gender = 'male'
-            if any(k in cat_meta for k in ['men', 'man', 'male', 'menswear', 'boy']):
-                score += 2
-                detected_gender = 'male'
-            if has_male_garment or any(bool(re.search(p, product_text)) for p in cls.MENSWEAR_ACCEPTED_PATTERNS):
-                score += 1
-                if detected_gender == 'unknown':
-                    detected_gender = 'male'
-
-            if score > 0 or has_male_garment:
-                return True, detected_gender, f'valid male product (score: {score})'
-
-            return False, 'unknown', 'no male indicators or menswear context found'
+            if det_gender == 'female':
+                return False, 'female', 'rejected opposite gender (female) product'
+            elif det_gender == 'male':
+                return True, 'male', 'valid male product'
+            elif det_gender == 'unisex':
+                return True, 'unisex', 'valid unisex product'
+            else: # 'unknown'
+                cat_ok, c_msg = cls.validate_category(
+                    title=product.get('title', ''),
+                    description=product.get('description', '') or product.get('snippet', ''),
+                    category=product.get('category', ''),
+                    target_category=target_category,
+                    target_gender=norm_target
+                )
+                if cat_ok:
+                    return True, 'unknown', 'accepted via menswear category relevance'
+                return False, 'unknown', f'no male evidence and {c_msg}'
 
         return False, 'unknown', 'invalid gender matching'
 
@@ -359,6 +334,321 @@ class ProductValidator:
         return True, 'Valid authentic image'
 
 
+def detect_product_gender(product: dict) -> str:
+    """
+    Detects product gender strictly using actual shopping data evidence.
+    Returns: 'female', 'male', 'unisex', or 'unknown'.
+
+    Priority:
+      1. Structured retailer/category metadata (category, product_type, department, gender)
+      2. Product title
+      3. Description/snippet
+      4. Inherently gendered garments (dress, gown, kurti, saree, etc. vs suit, sherwani, etc.)
+      5. Unknown (if no reliable evidence, do not guess)
+    """
+    if not product or not isinstance(product, dict):
+        return 'unknown'
+
+    # Priority 1: Structured retailer/category metadata
+    cat_meta = " ".join([
+        str(product.get("category", "") or ""),
+        str(product.get("product_type", "") or ""),
+        str(product.get("department", "") or ""),
+        str(product.get("gender", "") or "")
+    ]).lower()
+
+    if cat_meta:
+        has_cat_female = any(bool(re.search(pat, cat_meta)) for pat in ProductValidator.FEMALE_PATTERNS)
+        has_cat_male = any(bool(re.search(pat, cat_meta)) for pat in ProductValidator.MALE_PATTERNS)
+        has_cat_unisex = any(bool(re.search(pat, cat_meta)) for pat in ProductValidator.UNISEX_PATTERNS)
+
+        if has_cat_unisex or (has_cat_female and has_cat_male):
+            return 'unisex'
+        if has_cat_female and not has_cat_male:
+            return 'female'
+        if has_cat_male and not has_cat_female:
+            return 'male'
+
+    # Priority 2: Product title
+    title = str(product.get("title", "") or "").lower()
+    if title:
+        has_title_female = any(bool(re.search(pat, title)) for pat in ProductValidator.FEMALE_PATTERNS)
+        has_title_male = any(bool(re.search(pat, title)) for pat in ProductValidator.MALE_PATTERNS)
+        has_title_unisex = any(bool(re.search(pat, title)) for pat in ProductValidator.UNISEX_PATTERNS)
+
+        if has_title_unisex or (has_title_female and has_title_male):
+            return 'unisex'
+        if has_title_female and not has_title_male:
+            return 'female'
+        if has_title_male and not has_title_female:
+            return 'male'
+
+    # Priority 3: Description/snippet
+    desc = " ".join([
+        str(product.get("description", "") or ""),
+        str(product.get("snippet", "") or "")
+    ]).lower()
+    if desc:
+        has_desc_female = any(bool(re.search(pat, desc)) for pat in ProductValidator.FEMALE_PATTERNS)
+        has_desc_male = any(bool(re.search(pat, desc)) for pat in ProductValidator.MALE_PATTERNS)
+        has_desc_unisex = any(bool(re.search(pat, desc)) for pat in ProductValidator.UNISEX_PATTERNS)
+
+        if has_desc_unisex or (has_desc_female and has_desc_male):
+            return 'unisex'
+        if has_desc_female and not has_desc_male:
+            return 'female'
+        if has_desc_male and not has_desc_female:
+            return 'male'
+
+    # Priority 4: Inherently gendered garments
+    combined_text = f"{title} {desc}".lower()
+    is_false_dress = any(bool(re.search(exp, combined_text)) for exp in [
+        r'\bdress shoes?\b', r'\bdress shirts?\b', r'\bdress socks?\b', r'\bdress material\b',
+        r'\bdressing (table|mirror)\b', r'\bfancy dress\b'
+    ])
+    has_female_garment = any(bool(re.search(pat, combined_text)) for pat in ProductValidator.FEMALE_GARMENTS)
+    has_male_garment = any(bool(re.search(pat, combined_text)) for pat in ProductValidator.MALE_GARMENTS)
+    if is_false_dress and not any(bool(re.search(pat, combined_text)) for pat in [r'\bgown\b', r'\bskirt\b', r'\bkurti\b', r'\blehenga\b', r'\bsaree\b']):
+        has_female_garment = False
+
+    if has_female_garment and not has_male_garment:
+        return 'female'
+    if has_male_garment and not has_female_garment:
+        return 'male'
+
+    # Priority 5: Unknown
+    return 'unknown'
+
+
+ProductValidator.detect_product_gender = staticmethod(detect_product_gender)
+
+
+def parse_price_range(
+    range_str: Optional[str] = None,
+    custom_min: Optional[float] = None,
+    custom_max: Optional[float] = None
+) -> Tuple[Optional[float], Optional[float], str]:
+    """
+    Parses price filter into (min_price, max_price, display_label).
+    Supports preset ranges and custom min/max.
+    """
+    has_custom = False
+    c_min = None
+    c_max = None
+    if custom_min is not None and str(custom_min).strip() != '':
+        try:
+            c_min = float(custom_min)
+            has_custom = True
+        except (ValueError, TypeError):
+            pass
+    if custom_max is not None and str(custom_max).strip() != '':
+        try:
+            c_max = float(custom_max)
+            has_custom = True
+        except (ValueError, TypeError):
+            pass
+
+    if has_custom:
+        if c_min is not None and c_max is not None:
+            label = f"₹{int(c_min):,} – ₹{int(c_max):,}"
+        elif c_min is not None:
+            label = f"Above ₹{int(c_min):,}"
+        elif c_max is not None:
+            label = f"Under ₹{int(c_max):,}"
+        else:
+            label = "All Prices"
+        return c_min, c_max, label
+
+    if not range_str or str(range_str).strip().lower() in ('all', 'all prices', 'all_prices', ''):
+        return None, None, 'All Prices'
+
+    r = str(range_str).strip().lower()
+    if r in ('under_500', 'under 500', 'under-500', '<500', 'under ₹500'):
+        return None, 500.0, 'Under ₹500'
+    elif r in ('500_1000', '500-1000', '500 - 1000', '500_1,000', '₹500 – ₹1,000', '₹500 - ₹1,000'):
+        return 500.0, 1000.0, '₹500 – ₹1,000'
+    elif r in ('1000_2000', '1000-2000', '1000 - 2000', '1,000 - 2,000', '₹1,000 – ₹2,000', '₹1,000 - ₹2,000'):
+        return 1000.0, 2000.0, '₹1,000 – ₹2,000'
+    elif r in ('1000_2500', '1000-2500', '1000 - 2500', '1,000 - 2,500', '₹1,000 – ₹2,500', '₹1,000 - ₹2,500'):
+        return 1000.0, 2500.0, '₹1,000 – ₹2,500'
+    elif r in ('1000_3000', '1000-3000', '1000 - 3000', '1,000 - 3,000', '₹1,000 – ₹3,000', '₹1,000 - ₹3,000'):
+        return 1000.0, 3000.0, '₹1,000 – ₹3,000'
+    elif r in ('2000_3000', '2000-3000', '2000 - 3000', '2,000 - 3,000', '₹2,000 – ₹3,000', '₹2,000 - ₹3,000'):
+        return 2000.0, 3000.0, '₹2,000 – ₹3,000'
+    elif r in ('2500_5000', '2500-5000', '2500 - 5000', '2,500 - 5,000', '₹2,500 – ₹5,000', '₹2,500 - ₹5,000'):
+        return 2500.0, 5000.0, '₹2,500 – ₹5,000'
+    elif r in ('3000_5000', '3000-5000', '3000 - 5000', '3,000 - 5,000', '₹3,000 – ₹5,000', '₹3,000 - ₹5,000'):
+        return 3000.0, 5000.0, '₹3,000 – ₹5,000'
+    elif r in ('5000_10000', '5000-10000', '5000 - 10000', '5,000 - 10,000', '₹5,000 – ₹10,000', '₹5,000 - ₹10,000'):
+        return 5000.0, 10000.0, '₹5,000 – ₹10,000'
+    elif r in ('5000_plus', '5000+', 'above_5000', 'above 5000', '>5000', '₹5,000+'):
+        return 5000.0, None, '₹5,000+'
+    elif r in ('above_10000', 'above 10000', 'above-10000', '>10000', 'above ₹10,000'):
+        return 10000.0, None, 'Above ₹10,000'
+
+    # Try numeric range matching e.g. "1000-2500"
+    m = re.match(r'(\d+)\s*[-_–]\s*(\d+)', r)
+    if m:
+        mn, mx = float(m.group(1)), float(m.group(2))
+        return mn, mx, f"₹{int(mn):,} – ₹{int(mx):,}"
+
+    m_plus = re.match(r'(?:above|over|>)\s*(\d+)|(\d+)\s*(?:\+|plus)', r)
+    if m_plus:
+        val = float(m_plus.group(1) or m_plus.group(2))
+        return val, None, f"Above ₹{int(val):,}"
+
+    m_under = re.match(r'(?:under|below|<)\s*(\d+)', r)
+    if m_under:
+        val = float(m_under.group(1))
+        return None, val, f"Under ₹{int(val):,}"
+
+    return None, None, 'All Prices'
+
+
+ProductValidator.parse_price_range = staticmethod(parse_price_range)
+
+
+def validate_price(
+    price: Optional[float],
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None
+) -> Tuple[bool, str]:
+    """Validates that price is within the specified min/max range."""
+    if price is None:
+        return False, "NO"
+    if min_price is not None and price < min_price:
+        return False, "NO"
+    if max_price is not None and price > max_price:
+        return False, "NO"
+    return True, "YES"
+
+
+ProductValidator.validate_price = staticmethod(validate_price)
+
+
+def validate_retailer(
+    product_retailer: str,
+    requested_retailer: Optional[str] = None
+) -> Tuple[bool, str]:
+    """Validates that product retailer matches the requested retailer filter."""
+    if not requested_retailer or requested_retailer.lower() in ('all', 'all retailers', '', 'none'):
+        return True, "YES"
+    p_ret = (product_retailer or '').strip().lower()
+    req_ret = requested_retailer.strip().lower()
+    if 'amazon' in req_ret:
+        return ('amazon' in p_ret), "YES" if ('amazon' in p_ret) else "NO"
+    if 'myntra' in req_ret:
+        return ('myntra' in p_ret), "YES" if ('myntra' in p_ret) else "NO"
+    if 'ajio' in req_ret:
+        return ('ajio' in p_ret), "YES" if ('ajio' in p_ret) else "NO"
+    if 'flipkart' in req_ret:
+        return ('flipkart' in p_ret), "YES" if ('flipkart' in p_ret) else "NO"
+    if 'nykaa' in req_ret:
+        return ('nykaa' in p_ret), "YES" if ('nykaa' in p_ret) else "NO"
+    if 'meesho' in req_ret:
+        return ('meesho' in p_ret), "YES" if ('meesho' in p_ret) else "NO"
+    if 'zara' in req_ret:
+        return ('zara' in p_ret), "YES" if ('zara' in p_ret) else "NO"
+    if 'h&m' in req_ret or 'hm' in req_ret:
+        return ('h&m' in p_ret or 'hm' in p_ret), "YES" if ('h&m' in p_ret or 'hm' in p_ret) else "NO"
+    if 'tata' in req_ret or 'cliq' in req_ret:
+        return ('tata cliq' in p_ret or 'tatacliq' in p_ret), "YES" if ('tata cliq' in p_ret or 'tatacliq' in p_ret) else "NO"
+    if 'newme' in req_ret:
+        return ('newme' in p_ret), "YES" if ('newme' in p_ret) else "NO"
+    if 'vero moda' in req_ret:
+        return ('vero moda' in p_ret), "YES" if ('vero moda' in p_ret) else "NO"
+    if req_ret in p_ret or p_ret in req_ret:
+        return True, "YES"
+    return False, "NO"
+
+
+ProductValidator.validate_retailer = staticmethod(validate_retailer)
+
+
+# ------------------------------------------------------------------------------
+# SKIN-TONE COLOR PALETTES (Section 5)
+# ------------------------------------------------------------------------------
+SKIN_TONE_PALETTES = {
+    'fair': ['emerald', 'burgundy', 'navy', 'lavender', 'rose', 'pastel blue', 'forest green', 'wine', 'red'],
+    'light': ['soft blue', 'lavender', 'peach', 'mint green', 'rose pink', 'emerald', 'navy', 'wine'],
+    'medium': ['olive', 'emerald', 'mustard', 'rust', 'burgundy', 'teal', 'coral', 'beige', 'cream', 'navy'],
+    'olive': ['rust', 'coral', 'cream', 'charcoal', 'deep teal', 'olive', 'emerald', 'mustard', 'burgundy'],
+    'deep': ['emerald', 'cobalt blue', 'royal blue', 'burgundy', 'plum', 'mustard', 'orange', 'fuchsia', 'ivory', 'teal']
+}
+
+DEFAULT_SKIN_PALETTE = ['emerald', 'burgundy', 'navy', 'olive', 'coral', 'royal blue', 'wine', 'rust', 'cream', 'teal']
+
+
+def _safe_print(msg: str):
+    """Safely prints text handling Windows console encoding issues."""
+    try:
+        print(msg)
+    except (UnicodeEncodeError, Exception):
+        try:
+            cleaned = msg.encode('ascii', errors='replace').decode('ascii')
+            print(cleaned)
+        except Exception:
+            pass
+
+
+# ------------------------------------------------------------------------------
+# STRUCTURED DEBUG LOGGING (Section 27)
+# ------------------------------------------------------------------------------
+def log_shopping_request(gender: str, occasion: str, season: str, skin_tone: str, colors: List[str], price_range: str, retailer: Optional[str], target: int):
+    """Outputs standardized [SHOPPING REQUEST] logging."""
+    _safe_print(
+        f"\n[SHOPPING REQUEST]\n"
+        f"Gender: {gender}\n"
+        f"Occasion: {occasion}\n"
+        f"Season: {season}\n"
+        f"Skin Tone: {skin_tone}\n"
+        f"Colors: {', '.join(colors) if colors else 'default'}\n"
+        f"Price Range: {price_range}\n"
+        f"Retailer: {retailer or 'All Retailers'}\n"
+        f"Target: {target}"
+    )
+
+
+def log_shopping_query(query: str, returned: int, accepted: int, rejected: int):
+    """Outputs standardized [SHOPPING QUERY] logging."""
+    _safe_print(
+        f"\n[SHOPPING QUERY]\n"
+        f"Query: {query}\n"
+        f"Returned: {returned}\n"
+        f"Accepted: {accepted}\n"
+        f"Rejected: {rejected}"
+    )
+
+
+def log_shopping_filter(
+    title: str,
+    retailer: str,
+    live_price: Optional[float],
+    detected_gender: str,
+    detected_category: str,
+    color: str = "N/A",
+    availability: str = "IN STOCK",
+    url: str = "N/A",
+    decision: str = "ACCEPT",
+    reason: str = "All filters matched"
+):
+    """Outputs standardized [SHOPPING FILTER] logging matching Section 27."""
+    price_str = f"INR {int(live_price):,}" if live_price is not None else "N/A"
+    _safe_print(
+        f"\n[SHOPPING FILTER]\n"
+        f"Title: {title}\n"
+        f"Retailer: {retailer}\n"
+        f"Price: {price_str}\n"
+        f"Gender: {detected_gender}\n"
+        f"Category: {detected_category}\n"
+        f"Color: {color}\n"
+        f"Availability: {availability}\n"
+        f"URL: {url}\n"
+        f"Decision: {decision}\n"
+        f"Reason: {reason}"
+    )
+
+
 def log_filter_decision(
     title: str,
     retailer: str,
@@ -366,20 +656,57 @@ def log_filter_decision(
     requested_gender: str,
     detected_category: str,
     requested_category: str,
-    decision: str,
-    reason: str
+    live_price: Optional[float] = None,
+    selected_price_range: str = "All Prices",
+    price_match: str = "YES",
+    gender_match: str = "YES",
+    category_match: str = "YES",
+    decision: str = "ACCEPT",
+    reason: str = "All filters matched",
+    color: str = "N/A",
+    availability: str = "IN STOCK",
+    url: str = "N/A"
 ):
-    """Outputs standardized structured debug logging as required by specification."""
-    print(
-        f"\n[SHOPPING FILTER]\n"
-        f"Title: {title}\n"
-        f"Retailer: {retailer}\n"
-        f"Detected Gender: {detected_gender}\n"
-        f"Requested Gender: {requested_gender}\n"
-        f"Detected Category: {detected_category}\n"
-        f"Requested Category: {requested_category}\n"
-        f"Decision: {decision}\n"
-        f"Reason: {reason}"
+    """Backwards-compatible wrapper around log_shopping_filter."""
+    log_shopping_filter(
+        title=title,
+        retailer=retailer,
+        live_price=live_price,
+        detected_gender=detected_gender,
+        detected_category=detected_category,
+        color=color,
+        availability=availability,
+        url=url,
+        decision=decision,
+        reason=reason
+    )
+
+
+def log_shopping_summary(
+    api_requests: int,
+    candidates: int,
+    gender_accepted: int,
+    category_accepted: int,
+    price_accepted: int,
+    availability_accepted: int,
+    image_accepted: int,
+    url_accepted: int,
+    duplicates_removed: int,
+    final_products: int
+):
+    """Outputs standardized [SHOPPING SUMMARY] logging matching Section 27."""
+    _safe_print(
+        f"\n[SHOPPING SUMMARY]\n"
+        f"API Requests: {api_requests}\n"
+        f"Candidates: {candidates}\n"
+        f"Gender Accepted: {gender_accepted}\n"
+        f"Category Accepted: {category_accepted}\n"
+        f"Price Accepted: {price_accepted}\n"
+        f"Availability Accepted: {availability_accepted}\n"
+        f"Image Accepted: {image_accepted}\n"
+        f"URL Accepted: {url_accepted}\n"
+        f"Duplicates Removed: {duplicates_removed}\n"
+        f"Final Products: {final_products}"
     )
 
 
@@ -656,6 +983,399 @@ class SerpApiShoppingService:
     # Fetch Live Recommendations (Primary Entry Point)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Multi-Query Search Strategy & Parallel Execution (Sections 5, 6, 15)
+    # ------------------------------------------------------------------
+
+    def generate_multi_queries(
+        self,
+        norm_gender: str,
+        occasion: str,
+        season: str,
+        skin_palette: List[str],
+        target_category: str = 'dress'
+    ) -> List[str]:
+        """
+        Builds a multi-query search set for parallel SerpApi execution (Section 6).
+        Includes base query, multiple compatible colors matching skin tone palette (Section 5),
+        and dress style variations (midi, maxi, wrap, fit and flare, a-line, bodycon, cocktail).
+        """
+        occ_term = OCCASION_SEARCH_MAP.get((occasion or '').lower(), (occasion or '').lower())
+        if occ_term == 'all':
+            occ_term = ''
+        season_term = (season or '').lower()
+        if season_term in ('all', ''):
+            season_term = ''
+
+        queries = []
+        if norm_gender == 'female':
+            # Base query (e.g. "women party dress summer")
+            base = f"women {occ_term} dress {season_term}".strip()
+            queries.append(" ".join(base.split()))
+
+            # Color queries (multi-color search matching skin tone palette)
+            for col in (skin_palette or DEFAULT_SKIN_PALETTE)[:6]:
+                q = f"women {occ_term} dress {col} {season_term}".strip()
+                queries.append(" ".join(q.split()))
+
+            # Style variations (midi, maxi, wrap, fit and flare, a line, bodycon, cocktail)
+            styles = ['midi dress', 'maxi dress', 'wrap dress', 'a line dress', 'fit and flare dress', 'cocktail dress']
+            for st in styles[:4]:
+                q = f"women {st} {occ_term} {season_term}".strip()
+                queries.append(" ".join(q.split()))
+
+        else: # male
+            base = f"men {occ_term} casual shirt {season_term}".strip()
+            queries.append(" ".join(base.split()))
+
+            for col in (skin_palette or DEFAULT_SKIN_PALETTE)[:4]:
+                q = f"men {occ_term} shirt {col} {season_term}".strip()
+                queries.append(" ".join(q.split()))
+
+            styles = ['casual shirt', 'polo t-shirt', 'formal shirt', 'blazer']
+            for st in styles[:3]:
+                q = f"men {st} {occ_term} {season_term}".strip()
+                queries.append(" ".join(q.split()))
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped = []
+        for q in queries:
+            cleaned = " ".join(q.split())
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                deduped.append(cleaned)
+        return deduped
+
+    def generate_broadening_queries(
+        self,
+        norm_gender: str,
+        occasion: str,
+        season: str
+    ) -> List[str]:
+        """Progressive broadening queries (Section 15, Levels 3 & 4) preserving gender and category."""
+        occ_term = OCCASION_SEARCH_MAP.get((occasion or '').lower(), (occasion or '').lower())
+        if occ_term == 'all':
+            occ_term = ''
+        season_term = (season or '').lower()
+        if season_term in ('all', ''):
+            season_term = ''
+
+        broadening = []
+        if norm_gender == 'female':
+            if occ_term and season_term:
+                broadening.append(f"women {occ_term} dress {season_term}".strip())
+            if season_term:
+                broadening.append(f"women dress {season_term}".strip())
+            broadening.append("women dress online india")
+        else:
+            if occ_term and season_term:
+                broadening.append(f"men {occ_term} clothing {season_term}".strip())
+            broadening.append("men casual clothing")
+        
+        seen = set()
+        deduped = []
+        for q in broadening:
+            cleaned = " ".join(q.split())
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                deduped.append(cleaned)
+        return deduped
+
+    def _execute_single_serpapi_query(self, query: str, timeout: int = 10) -> Tuple[str, List[dict]]:
+        """Executes a single SerpApi Google Shopping query with timeout handling."""
+        params = {
+            'engine': 'google_shopping',
+            'q': query,
+            'gl': 'in',
+            'hl': 'en',
+            'api_key': self.api_key,
+            'num': 30
+        }
+        try:
+            resp = requests.get(self.base_url, params=params, timeout=timeout)
+            if resp.ok:
+                data = resp.json()
+                results = data.get('shopping_results', []) or []
+                return query, results
+            else:
+                print(f"[ShoppingService] HTTP {resp.status_code} for query '{query}'")
+        except Exception as e:
+            print(f"[ShoppingService] Timeout/error querying '{query}': {e}")
+        return query, []
+
+    @staticmethod
+    def calculate_ranking_score(
+        title: str,
+        matched_color: bool,
+        occasion: str,
+        season: str,
+        availability: str,
+        is_direct: bool,
+        retailer_count: int,
+        brand: Optional[str]
+    ) -> float:
+        """
+        Calculates recommendation ranking score per Section 24:
+        occasion relevance: +25
+        season relevance: +20
+        skin-tone color match: +20
+        availability: +15
+        direct product page: +10
+        retailer diversity: +5
+        brand/quality metadata: +5
+        """
+        score = 0.0
+        t_low = title.lower()
+        occ_low = (occasion or '').lower()
+        seas_low = (season or '').lower()
+
+        # Occasion relevance: +25
+        if occ_low and occ_low != 'all' and occ_low in t_low:
+            score += 25.0
+        else:
+            score += 10.0
+
+        # Season relevance: +20
+        if seas_low and seas_low != 'all' and seas_low in t_low:
+            score += 20.0
+        else:
+            score += 10.0
+
+        # Skin-tone color match: +20
+        if matched_color:
+            score += 20.0
+        else:
+            score += 5.0
+
+        # Availability: +15
+        if availability == "IN STOCK":
+            score += 15.0
+        elif availability == "LIMITED":
+            score += 10.0
+
+        # Direct product page: +10
+        if is_direct:
+            score += 10.0
+
+        # Retailer diversity: +5 (if not oversaturated)
+        if retailer_count <= 2:
+            score += 5.0
+
+        # Brand / quality metadata: +5
+        if brand and brand.lower() not in ('online store', 'retailer', ''):
+            score += 5.0
+
+        return score
+
+    def _process_candidate_items(
+        self,
+        raw_items: List[dict],
+        norm_gender: str,
+        target_category: str,
+        req_ret: Optional[str],
+        min_p: Optional[float],
+        max_p: Optional[float],
+        price_label: str,
+        occasion: str,
+        season: str,
+        palette: List[str],
+        seen_urls: set,
+        seen_title_keys: set,
+        retailer_candidate_counts: dict,
+        stats: dict
+    ) -> List[dict]:
+        """
+        Filters and scores raw SerpApi items under strict gender, category, image, URL,
+        and price range constraints with structured logging.
+        """
+        accepted_candidates = []
+
+        for it in raw_items:
+            stats['candidates'] += 1
+            title = (it.get('title') or '').strip()
+            thumbnail = (it.get('thumbnail') or '').strip()
+            price = it.get('extracted_price')
+            raw_source = it.get('source') or 'Online Retailer'
+            pre_retailer = self.clean_retailer_name(raw_source)
+            det_cat = ProductValidator.detect_category(title, it.get('snippet', ''), it.get('category', ''))
+
+            # Basic field presence
+            if not title or not thumbnail or price is None:
+                log_shopping_filter(title or 'Unknown', pre_retailer, price, "unknown", det_cat, decision="REJECT", reason="Missing title, thumbnail, or price")
+                continue
+
+            # Hard reject mock retailer
+            if pre_retailer.lower() == 'aurafit official':
+                continue
+
+            # 1. Retailer filter
+            ret_ok, _ = validate_retailer(pre_retailer, req_ret)
+            if not ret_ok:
+                log_shopping_filter(title, pre_retailer, price, "unknown", det_cat, decision="REJECT", reason=f"Retailer mismatch ({pre_retailer} != {req_ret})")
+                continue
+
+            # 2. Strict authentic image validation
+            img_ok, img_reason = ProductValidator.validate_image(thumbnail)
+            if not img_ok:
+                log_shopping_filter(title, pre_retailer, price, "unknown", det_cat, decision="REJECT", reason=f"Invalid image: {img_reason}")
+                continue
+            stats['image_accepted'] += 1
+
+            # 3. Strict gender validation
+            det_gender = detect_product_gender(it)
+            gender_ok, det_gender, g_reason = ProductValidator.is_gender_compatible(
+                product=it,
+                target_gender=norm_gender,
+                target_category=target_category
+            )
+            if not gender_ok:
+                log_shopping_filter(title, pre_retailer, price, det_gender, det_cat, decision="REJECT", reason=g_reason)
+                continue
+            stats['gender_accepted'] += 1
+
+            # 4. Strict category validation (dresses for female, menswear for male)
+            cat_ok, c_reason = ProductValidator.validate_category(
+                title=title,
+                description=it.get('snippet', '') or it.get('description', ''),
+                category=it.get('category', ''),
+                target_category=target_category,
+                target_gender=norm_gender
+            )
+            if not cat_ok:
+                log_shopping_filter(title, pre_retailer, price, det_gender, det_cat, decision="REJECT", reason=c_reason)
+                continue
+            stats['category_accepted'] += 1
+
+            # 5. Price Range Validation
+            live_price = float(price)
+            price_ok, _ = validate_price(live_price, min_p, max_p)
+            if not price_ok:
+                log_shopping_filter(title, pre_retailer, live_price, det_gender, det_cat, decision="REJECT", reason=f"Price ₹{live_price} not in {price_label}")
+                continue
+            stats['price_accepted'] += 1
+
+            # 6. Fast direct URL extraction (0ms first check)
+            cand = self.unwrap_and_clean_url(it.get('link') or it.get('product_link'))
+            direct_url = None
+            resolved_source = raw_source
+            original_price = it.get('extracted_old_price') or it.get('extracted_original_price')
+
+            if cand and self.is_valid_direct_url(cand):
+                direct_url = cand
+            elif it.get('immersive_product_page_token'):
+                store_offer = self.resolve_immersive_store_offer(it)
+                if store_offer and store_offer.get('direct_url'):
+                    direct_url = store_offer['direct_url']
+                    if store_offer.get('price'):
+                        live_price = float(store_offer['price'])
+                    if store_offer.get('store_name'):
+                        resolved_source = store_offer['store_name']
+                    if store_offer.get('original_price'):
+                        original_price = float(store_offer['original_price'])
+
+            if not direct_url or not self.is_valid_direct_url(direct_url):
+                log_shopping_filter(title, pre_retailer, live_price, det_gender, det_cat, decision="REJECT", reason="No valid direct retailer URL")
+                continue
+            stats['url_accepted'] += 1
+
+            # Re-normalize retailer after resolving direct source
+            final_retailer = self.clean_retailer_name(resolved_source)
+            if final_retailer.lower() == 'aurafit official':
+                continue
+
+            ret_ok2, _ = validate_retailer(final_retailer, req_ret)
+            if not ret_ok2:
+                continue
+
+            # Deduplication: direct URL
+            if direct_url in seen_urls:
+                stats['duplicates_removed'] += 1
+                continue
+            seen_urls.add(direct_url)
+
+            # Deduplication: Title key across sizes/SKUs
+            clean_title_words = [
+                w for w in re.sub(r'[^a-zA-Z0-9\s]', '', title.lower()).split()
+                if w not in ['women', 'womens', 'ladies', 'dress', 'color', 'size', 'party', 'summer', 'fit', 'flare', 'printed', 'solid', 'men', 'mens', 'shirt', 'cotton']
+            ]
+            title_key = " ".join(clean_title_words[:3])
+            if title_key and title_key in seen_title_keys:
+                stats['duplicates_removed'] += 1
+                continue
+            if title_key:
+                seen_title_keys.add(title_key)
+
+            # Availability
+            availability = self.parse_availability(it.get('details_and_offers', []), it.get('delivery'))
+            if availability == "OUT OF STOCK":
+                log_shopping_filter(title, final_retailer, live_price, det_gender, det_cat, availability=availability, decision="REJECT", reason="Product is out of stock")
+                continue
+            stats['availability_accepted'] += 1
+
+            # Discount calculation
+            discount_str = None
+            if original_price and original_price > live_price:
+                discount_pct = round((1 - (live_price / original_price)) * 100)
+                if discount_pct > 0:
+                    discount_str = f"{discount_pct}% OFF"
+
+            # Color matching & palette detection
+            matched_color = any(c.lower() in title.lower() for c in palette)
+            detected_colors = [c for c in palette if c.lower() in title.lower()]
+            if not detected_colors:
+                detected_colors = [palette[0]] if palette else ['emerald']
+
+            # Section 24 Candidate Ranking Score
+            score = self.calculate_ranking_score(
+                title=title,
+                matched_color=matched_color,
+                occasion=occasion,
+                season=season,
+                availability=availability,
+                is_direct=True,
+                retailer_count=retailer_candidate_counts.get(final_retailer, 0),
+                brand=it.get('brand')
+            )
+
+            retailer_candidate_counts[final_retailer] = retailer_candidate_counts.get(final_retailer, 0) + 1
+            candidate_item = {
+                'it': it,
+                'title': title,
+                'title_key': title_key,
+                'thumbnail': thumbnail,
+                'retailer_name': final_retailer,
+                'brand': it.get('brand') or final_retailer,
+                'final_price': live_price,
+                'original_price': original_price,
+                'discount_str': discount_str,
+                'availability': availability,
+                'direct_url': direct_url,
+                'det_gender': det_gender,
+                'ranking_score': score,
+                'colors': detected_colors
+            }
+            accepted_candidates.append(candidate_item)
+
+            log_shopping_filter(
+                title=title,
+                retailer=final_retailer,
+                live_price=live_price,
+                detected_gender=det_gender,
+                detected_category=det_cat,
+                color=detected_colors[0],
+                availability=availability,
+                url=direct_url,
+                decision="ACCEPT",
+                reason=f"All filters matched (ranking score: {score})"
+            )
+
+        return accepted_candidates
+
+    # ------------------------------------------------------------------
+    # Fetch Live Recommendations (Primary Entry Point)
+    # ------------------------------------------------------------------
+
     def fetch_live_recommendations(
         self,
         profile,
@@ -664,12 +1384,17 @@ class SerpApiShoppingService:
         season: str,
         compatible_colors: List[str],
         target_category: str = 'dress',
-        limit: int = 8
+        limit: int = 25,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        price_range: Optional[str] = None,
+        retailer: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Fetches live products from SerpApi Google Shopping + Immersive Stores.
+        Fetches live products from SerpApi Google Shopping using parallel multi-query execution.
         Enforces strict gender validation, category validation, exact-URL verification,
-        and returns immutable standardized dicts backed by database records.
+        real price range filtering, and retailer diversity.
+        Returns immutable standardized dicts backed by database records.
         """
         if not self.is_configured():
             print("[ShoppingService] SERPAPI_KEY is not configured")
@@ -679,46 +1404,154 @@ class SerpApiShoppingService:
         if norm_gender not in ('female', 'male'):
             norm_gender = 'female'
 
-        # Check Cache
+        min_p, max_p, price_label = parse_price_range(price_range, min_price, max_price)
+        req_ret = (retailer or '').strip() if retailer and retailer.lower() not in ('all', 'all retailers', 'none', '') else None
+        target_limit = max(15, int(limit or 25))
+
         skin_tone = (getattr(profile, 'skin_tone', None) or '').lower()
-        primary_color = compatible_colors[0] if compatible_colors else 'default'
-        cache_key = f"{norm_gender}_{skin_tone}_{occasion}_{season}_{primary_color}_{target_category}"
+        palette = list(SKIN_TONE_PALETTES.get(skin_tone, DEFAULT_SKIN_PALETTE))
+        if compatible_colors:
+            for c in compatible_colors:
+                if c and c.lower() not in palette:
+                    palette.insert(0, c.lower())
+
+        # Structured Log: Shopping Request (Section 27)
+        log_shopping_request(
+            gender=norm_gender,
+            occasion=occasion,
+            season=season,
+            skin_tone=skin_tone or 'unspecified',
+            colors=palette[:5],
+            price_range=price_label,
+            retailer=req_ret or 'All Retailers',
+            target=target_limit
+        )
+
+        # Check Cache
+        cache_key = f"{norm_gender}_{skin_tone}_{occasion}_{season}_{min_p}_{max_p}_{req_ret or 'all'}_{target_limit}"
         cached = _shopping_cache.get(cache_key)
         if cached:
             print(f"[ShoppingService] Returning {len(cached)} live products from cache ({cache_key})")
             return cached
 
-        query = self.build_shopping_query(profile, preferences, occasion, season, compatible_colors, target_category)
-        print(f"[ShoppingService] Live query: '{query}'")
+        # Generate Multi-Query Set (Sections 5 & 6)
+        queries = self.generate_multi_queries(norm_gender, occasion, season, palette, target_category)
+        print(f"[ShoppingService] Launching {len(queries)} parallel live queries for {norm_gender} / {occasion} / {season}")
 
-        params = {
-            'engine': 'google_shopping',
-            'q': query,
-            'gl': 'in',
-            'hl': 'en',
-            'api_key': self.api_key,
-            'num': 25
+        stats = {
+            'candidates': 0,
+            'gender_accepted': 0,
+            'category_accepted': 0,
+            'price_accepted': 0,
+            'availability_accepted': 0,
+            'image_accepted': 0,
+            'url_accepted': 0,
+            'duplicates_removed': 0,
+            'final_products': 0
         }
 
-        try:
-            resp = requests.get(self.base_url, params=params, timeout=25)
-            resp.raise_for_status()
-            data = resp.json()
-            shopping_results = data.get('shopping_results', [])
-            print(f"[ShoppingService] SerpApi returned {len(shopping_results)} items for '{query}'")
-        except Exception as e:
-            print(f"[ShoppingService] Failed to query SerpApi: {e}")
+        seen_urls = set()
+        seen_title_keys = set()
+        retailer_candidate_counts = {}
+        all_candidates = []
+        executed_queries_count = 0
+
+        # Run primary multi-queries concurrently
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 10): q for q in queries}
+            for future in as_completed(future_to_query):
+                executed_queries_count += 1
+                q = future_to_query[future]
+                try:
+                    _, raw_results = future.result()
+                except Exception as e:
+                    print(f"[ShoppingService] Query failed '{q}': {e}")
+                    raw_results = []
+
+                candidates_from_query = self._process_candidate_items(
+                    raw_items=raw_results,
+                    norm_gender=norm_gender,
+                    target_category=target_category,
+                    req_ret=req_ret,
+                    min_p=min_p,
+                    max_p=max_p,
+                    price_label=price_label,
+                    occasion=occasion,
+                    season=season,
+                    palette=palette,
+                    seen_urls=seen_urls,
+                    seen_title_keys=seen_title_keys,
+                    retailer_candidate_counts=retailer_candidate_counts,
+                    stats=stats
+                )
+                all_candidates.extend(candidates_from_query)
+
+                # Structured Log: Shopping Query (Section 27)
+                log_shopping_query(
+                    query=q,
+                    returned=len(raw_results),
+                    accepted=len(candidates_from_query),
+                    rejected=len(raw_results) - len(candidates_from_query)
+                )
+
+        # Progressive Broadening if candidates < target_limit (Section 15)
+        if len(all_candidates) < target_limit:
+            broadening_queries = self.generate_broadening_queries(norm_gender, occasion, season)
+            remaining_broad = [bq for bq in broadening_queries if bq not in queries]
+            if remaining_broad:
+                print(f"[ShoppingService] Progressive broadening: launching {len(remaining_broad)} fallback queries")
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    broad_futures = {executor.submit(self._execute_single_serpapi_query, bq, 10): bq for bq in remaining_broad}
+                    for future in as_completed(broad_futures):
+                        executed_queries_count += 1
+                        bq = broad_futures[future]
+                        try:
+                            _, raw_results = future.result()
+                        except Exception as e:
+                            raw_results = []
+
+                        broad_candidates = self._process_candidate_items(
+                            raw_items=raw_results,
+                            norm_gender=norm_gender,
+                            target_category=target_category,
+                            req_ret=req_ret,
+                            min_p=min_p,
+                            max_p=max_p,
+                            price_label=price_label,
+                            occasion=occasion,
+                            season=season,
+                            palette=palette,
+                            seen_urls=seen_urls,
+                            seen_title_keys=seen_title_keys,
+                            retailer_candidate_counts=retailer_candidate_counts,
+                            stats=stats
+                        )
+                        all_candidates.extend(broad_candidates)
+                        log_shopping_query(
+                            query=bq,
+                            returned=len(raw_results),
+                            accepted=len(broad_candidates),
+                            rejected=len(raw_results) - len(broad_candidates)
+                        )
+
+        # Resilient live fallback: if live queries returned 0 candidates (e.g. rate limit / HTTP 429 quota exhaustion or temporary network dropout),
+        # use the authentic live SerpApi products previously fetched and persisted in the database.
+        # Strict validation (gender, category, price range, retailer) is STILL enforced identically!
+        if len(all_candidates) == 0:
+            print("[ShoppingService] Live queries returned 0 results. Checking persisted live SerpApi items under identical strict filters...")
             from models.outfit import Outfit
-            live_db_outfits = Outfit.query.filter_by(source='serpapi').all()
+            db_query = Outfit.query.filter_by(source='serpapi')
+            if req_ret:
+                db_query = db_query.filter(Outfit.store.ilike(f"%{req_ret}%"))
+            live_db_outfits = db_query.all()
             if live_db_outfits:
-                print(f"[ShoppingService] Fallback to {len(live_db_outfits)} persisted live SerpApi items under strict validation")
-                shopping_results = [
+                db_raw_items = [
                     {
                         'title': o.name,
                         'thumbnail': o.image_url,
                         'thumbnails': o.additional_images or [],
                         'extracted_price': o.price,
-                        'price': f"₹{int(o.price)}" if o.price else None,
+                        'price': f"INR {int(o.price)}" if o.price else None,
                         'extracted_old_price': o.original_price,
                         'source': o.store or o.brand or 'Online Store',
                         'brand': o.brand,
@@ -729,232 +1562,51 @@ class SerpApiShoppingService:
                     }
                     for o in live_db_outfits
                 ]
-            else:
-                return []
-
-        # Diagnostics counters
-        stats = {
-            'scanned': len(shopping_results),
-            'rejected_gender': 0,
-            'rejected_category': 0,
-            'rejected_image': 0,
-            'rejected_other': 0,
-            'valid_candidates': 0,
-        }
-
-        candidates = []
-        seen_urls = set()
-        seen_title_keys = set()
-        retailer_candidate_counts = {}
-
-        for it in shopping_results:
-            title = (it.get('title') or '').strip()
-            thumbnail = (it.get('thumbnail') or '').strip()
-            price = it.get('extracted_price')
-            # Basic validation
-            raw_source = it.get('source') or 'Online Retailer'
-            pre_retailer = self.clean_retailer_name(raw_source)
-            det_cat = ProductValidator.detect_category(title, it.get('snippet', ''), it.get('category', ''))
-
-            if not title or not thumbnail or price is None:
-                stats['rejected_other'] += 1
-                continue
-
-            # 1. STRICT IMAGE VALIDATION
-            img_ok, img_reason = ProductValidator.validate_image(thumbnail)
-            if not img_ok:
-                stats['rejected_image'] += 1
-                log_filter_decision(
-                    title=title,
-                    retailer=pre_retailer,
-                    detected_gender="unknown",
-                    requested_gender=norm_gender,
-                    detected_category=det_cat,
-                    requested_category=target_category,
-                    decision="REJECT",
-                    reason=f"invalid image ({img_reason})"
+                db_candidates = self._process_candidate_items(
+                    raw_items=db_raw_items,
+                    norm_gender=norm_gender,
+                    target_category=target_category,
+                    req_ret=req_ret,
+                    min_p=min_p,
+                    max_p=max_p,
+                    price_label=price_label,
+                    occasion=occasion,
+                    season=season,
+                    palette=palette,
+                    seen_urls=seen_urls,
+                    seen_title_keys=seen_title_keys,
+                    retailer_candidate_counts=retailer_candidate_counts,
+                    stats=stats
                 )
-                continue
+                all_candidates.extend(db_candidates)
 
-            # 2. STRICT GENDER VALIDATION VIA SCORING
-            gender_ok, det_gender, g_reason = ProductValidator.is_gender_compatible(
-                product=it,
-                target_gender=norm_gender,
-                target_category=target_category
-            )
-            if not gender_ok:
-                stats['rejected_gender'] += 1
-                log_filter_decision(
-                    title=title,
-                    retailer=pre_retailer,
-                    detected_gender=det_gender,
-                    requested_gender=norm_gender,
-                    detected_category=det_cat,
-                    requested_category=target_category,
-                    decision="REJECT",
-                    reason=g_reason
-                )
-                continue
+        # Multi-retailer diversification (Section 18) & ranking
+        all_candidates.sort(key=lambda x: x['ranking_score'], reverse=True)
 
-            # 3. STRICT CATEGORY VALIDATION
-            cat_ok, c_reason = ProductValidator.validate_category(
-                title=title,
-                description=it.get('snippet', '') or it.get('description', ''),
-                category=it.get('category', ''),
-                target_category=target_category,
-                target_gender=norm_gender
-            )
-            if not cat_ok:
-                stats['rejected_category'] += 1
-                log_filter_decision(
-                    title=title,
-                    retailer=pre_retailer,
-                    detected_gender=det_gender,
-                    requested_gender=norm_gender,
-                    detected_category=det_cat,
-                    requested_category=target_category,
-                    decision="REJECT",
-                    reason=c_reason
-                )
-                continue
-
-            # Title key for deduplicating identical items across sizes/SKUs
-            clean_title_words = [
-                w for w in re.sub(r'[^a-zA-Z0-9\s]', '', title.lower()).split()
-                if w not in ['women', 'womens', 'ladies', 'dress', 'color', 'size', 'party', 'summer', 'fit', 'flare', 'printed', 'solid', 'men', 'mens']
-            ]
-            title_key = " ".join(clean_title_words[:3])
-            if title_key and title_key in seen_title_keys:
-                continue
-
-            # Pre-filter by retailer to avoid redundant API calls
-            raw_source = it.get('source') or 'Online Retailer'
-            pre_retailer = self.clean_retailer_name(raw_source)
-            if pre_retailer.lower() == 'aurafit official':
-                continue
-            if retailer_candidate_counts.get(pre_retailer, 0) >= 2:
-                continue
-
-            # Resolve exact direct retailer link via Immersive Product Stores
-            store_offer = self.resolve_immersive_store_offer(it)
-            direct_url = None
-            final_price = float(price)
-            original_price = it.get('extracted_old_price')
-            details_and_offers = []
-
-            if store_offer:
-                direct_url = store_offer['direct_url']
-                raw_source = store_offer['store_name']
-                if store_offer.get('price'):
-                    final_price = float(store_offer['price'])
-                if store_offer.get('original_price'):
-                    original_price = float(store_offer['original_price'])
-                details_and_offers = store_offer.get('details_and_offers', [])
-            else:
-                # Check candidate links in top item if no immersive store
-                cand = self.unwrap_and_clean_url(it.get('link') or it.get('product_link'))
-                if cand and self.is_valid_direct_url(cand):
-                    direct_url = cand
-
-            # STRICT REQUIREMENT: If no exact direct retailer URL, discard!
-            if not direct_url or not self.is_valid_direct_url(direct_url):
-                stats['rejected_other'] += 1
-                continue
-            if direct_url in seen_urls:
-                continue
-            seen_urls.add(direct_url)
-
-            # Clean and validate retailer name
-            retailer_name = self.clean_retailer_name(raw_source)
-            if retailer_name.lower() == 'aurafit official':
-                continue
-
-            # Availability
-            availability = self.parse_availability(details_and_offers, it.get('delivery'))
-            if availability == "OUT OF STOCK":
-                stats['rejected_other'] += 1
-                continue
-
-            # Discount calculation
-            discount_str = None
-            if original_price and original_price > final_price:
-                discount_pct = round((1 - (final_price / original_price)) * 100)
-                if discount_pct > 0:
-                    discount_str = f"{discount_pct}% OFF"
-
-            # Stable collision-free external ID
-            ext_id = self.generate_stable_external_id(it, direct_url, retailer_name, is_similar=False)
-
-            # Brand detection
-            brand = it.get('brand') or retailer_name
-
-            if title_key:
-                seen_title_keys.add(title_key)
-            retailer_candidate_counts[retailer_name] = retailer_candidate_counts.get(retailer_name, 0) + 1
-            stats['valid_candidates'] += 1
-
-            candidates.append({
-                'it': it,
-                'title': title,
-                'title_key': title_key,
-                'thumbnail': thumbnail,
-                'retailer_name': retailer_name,
-                'brand': brand,
-                'final_price': final_price,
-                'original_price': original_price,
-                'discount_str': discount_str,
-                'availability': availability,
-                'direct_url': direct_url,
-                'ext_id': ext_id
-            })
-
-            log_filter_decision(
-                title=title,
-                retailer=retailer_name,
-                detected_gender=det_gender,
-                requested_gender=norm_gender,
-                detected_category=det_cat,
-                requested_category=target_category,
-                decision="ACCEPT",
-                reason=f"valid {norm_gender} {target_category} with direct retailer URL"
-            )
-
-            # Check if we have enough diverse candidates
-            if len(candidates) >= limit and len(retailer_candidate_counts) >= 3:
-                break
-
-        self.last_fetch_stats = stats
-        print(f"[ShoppingService] Validation stats: {stats}")
-
-        # Multi-retailer diversification:
-        # Pass 1: Select up to 2 items per retailer, deduplicating identical dress titles
         selected_candidates = []
-        seen_title_keys = set()
-        retailer_counts = {}
+        retailer_pick_counts = {}
+        max_per_retailer = max(3, target_limit // 4)
 
-        for c in candidates:
+        # Pass 1: Diversify across retailers when "All Retailers" is selected
+        for c in all_candidates:
             r = c['retailer_name']
-            tk = c['title_key']
-            if tk and tk in seen_title_keys:
-                continue
-            if retailer_counts.get(r, 0) >= 2:
+            if not req_ret and retailer_pick_counts.get(r, 0) >= max_per_retailer:
                 continue
             selected_candidates.append(c)
-            if tk:
-                seen_title_keys.add(tk)
-            retailer_counts[r] = retailer_counts.get(r, 0) + 1
-            if len(selected_candidates) >= limit:
+            retailer_pick_counts[r] = retailer_pick_counts.get(r, 0) + 1
+            if len(selected_candidates) >= target_limit:
                 break
 
-        # Pass 2: Backfill from remaining valid candidates if below limit
-        if len(selected_candidates) < limit:
-            for c in candidates:
+        # Pass 2: Backfill from remaining valid ranked candidates if below target_limit
+        if len(selected_candidates) < target_limit:
+            for c in all_candidates:
                 if c in selected_candidates:
                     continue
                 selected_candidates.append(c)
-                if len(selected_candidates) >= limit:
+                if len(selected_candidates) >= target_limit:
                     break
 
+        # Persist selected candidates and build standardized response (Section 23 & 32)
         live_products = []
         for c in selected_candidates:
             it = c['it']
@@ -967,16 +1619,14 @@ class SerpApiShoppingService:
             discount_str = c['discount_str']
             availability = c['availability']
             direct_url = c['direct_url']
-            ext_id = c['ext_id']
+            ext_id = self.generate_stable_external_id(it, direct_url, retailer_name, is_similar=False)
 
-            # Collect any additional images belonging to this exact product
             extra_imgs = []
             if isinstance(it.get('thumbnails'), list):
                 for t_url in it.get('thumbnails'):
                     if t_url and t_url != thumbnail and ProductValidator.validate_image(t_url)[0]:
                         extra_imgs.append(t_url)
 
-            # Persist to database so OutfitDetail.js loads the EXACT same record by ID
             outfit_record = self._persist_live_outfit(
                 external_id=ext_id,
                 title=title,
@@ -987,41 +1637,60 @@ class SerpApiShoppingService:
                 original_price=original_price,
                 discount=discount_str,
                 product_url=direct_url,
-                gender=norm_gender,
+                gender=c.get('det_gender') if c.get('det_gender') in ('female', 'male', 'unisex') else norm_gender,
                 category=target_category,
                 occasion=OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
                 season=season if season != 'all' else 'all',
-                colors=compatible_colors[:3] if compatible_colors else ['burgundy', 'pink'],
+                colors=c['colors'],
                 additional_images=extra_imgs
             )
 
-            # Derive product dict directly from the persisted record to guarantee 100% identity consistency
-            product_dict = outfit_record.to_dict()
-            product_dict['title'] = outfit_record.name
-            product_dict['availability'] = availability
-            product_dict['shopping_links'] = { retailer_name.lower().replace(' ', ''): direct_url }
-            live_products.append(product_dict)
+            if outfit_record:
+                p_dict = outfit_record.to_dict()
+                p_dict['title'] = outfit_record.name
+                p_dict['availability'] = availability
+                p_dict['shopping_links'] = { retailer_name.lower().replace(' ', ''): direct_url }
+                p_dict['match_score'] = round(c['ranking_score'] / 100.0, 2)
+                live_products.append(p_dict)
 
-        print(f"[ShoppingService] Resolved {len(live_products)} live diverse purchasable products with direct URLs")
+        # Structured Log: Shopping Summary (Section 27)
+        stats['final_products'] = len(live_products)
+        log_shopping_summary(
+            api_requests=executed_queries_count,
+            candidates=stats['candidates'],
+            gender_accepted=stats['gender_accepted'],
+            category_accepted=stats['category_accepted'],
+            price_accepted=stats['price_accepted'],
+            availability_accepted=stats['availability_accepted'],
+            image_accepted=stats['image_accepted'],
+            url_accepted=stats['url_accepted'],
+            duplicates_removed=stats['duplicates_removed'],
+            final_products=stats['final_products']
+        )
+
         if live_products:
             _shopping_cache.set(cache_key, live_products)
 
         return live_products
 
     # ------------------------------------------------------------------
-    # Similar Recommendations Query
+    # Similar Recommendations Query (Sections 25 & 9)
     # ------------------------------------------------------------------
 
     def fetch_similar_live_products(
         self,
         main_product: Dict[str, Any],
         profile,
-        limit: int = 4
+        limit: int = 4,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        price_range: Optional[str] = None,
+        retailer: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Generates a live shopping query based on the main recommended item
-        (same category, compatible color, occasion) and returns real SerpApi products
-        passing the exact same strict gender and category validation.
+        and returns real SerpApi products passing the exact same strict gender,
+        dress category, price range, and retailer validation.
         """
         if not self.is_configured():
             return []
@@ -1030,41 +1699,33 @@ class SerpApiShoppingService:
         if norm_gender not in ('female', 'male'):
             norm_gender = 'female'
 
-        color = (main_product.get('colors') or ['olive green'])[0]
+        color = (main_product.get('colors') or ['emerald'])[0]
         occasion = main_product.get('occasion') or 'party'
         target_category = main_product.get('category') or ('dress' if norm_gender == 'female' else 'casual shirt')
 
-        cache_key = f"similar_{norm_gender}_{color}_{occasion}_{target_category}"
+        min_p, max_p, price_label = parse_price_range(price_range, min_price, max_price)
+        req_ret = (retailer or '').strip() if retailer and retailer.lower() not in ('all', 'all retailers', 'none', '') else None
+
+        cache_key = f"similar_{norm_gender}_{color}_{occasion}_{target_category}_{min_p}_{max_p}_{req_ret or 'all'}"
         cached = _shopping_cache.get(cache_key)
         if cached:
             return cached
 
-        # Similar query: e.g. "women olive green party dress" or "men navy party shirt"
         if norm_gender == 'female':
             similar_query = f"women {color} {occasion} dress".strip()
         else:
             similar_query = f"men {target_category} {color} {occasion}".strip()
 
         print(f"[ShoppingService] Similar live query: '{similar_query}'")
+        _, results = self._execute_single_serpapi_query(similar_query, timeout=10)
 
-        params = {
-            'engine': 'google_shopping',
-            'q': similar_query,
-            'gl': 'in',
-            'hl': 'en',
-            'api_key': self.api_key,
-            'num': 20
-        }
-
-        try:
-            resp = requests.get(self.base_url, params=params, timeout=25)
-            if not resp.ok:
-                raise Exception(f"HTTP {resp.status_code}")
-            results = resp.json().get('shopping_results', [])
-        except Exception as e:
-            print(f"[ShoppingService] Similar query error: {e}")
+        if not results:
+            print("[ShoppingService] Similar query returned 0 results. Checking persisted live SerpApi items under strict validation...")
             from models.outfit import Outfit
-            live_db_outfits = Outfit.query.filter_by(source='serpapi').all()
+            db_query = Outfit.query.filter_by(source='serpapi')
+            if req_ret:
+                db_query = db_query.filter(Outfit.store.ilike(f"%{req_ret}%"))
+            live_db_outfits = db_query.all()
             if live_db_outfits:
                 results = [
                     {
@@ -1072,7 +1733,7 @@ class SerpApiShoppingService:
                         'thumbnail': o.image_url,
                         'thumbnails': o.additional_images or [],
                         'extracted_price': o.price,
-                        'price': f"₹{int(o.price)}" if o.price else None,
+                        'price': f"INR {int(o.price)}" if o.price else None,
                         'extracted_old_price': o.original_price,
                         'source': o.store or o.brand or 'Online Store',
                         'brand': o.brand,
@@ -1083,8 +1744,6 @@ class SerpApiShoppingService:
                     }
                     for o in live_db_outfits
                 ]
-            else:
-                results = []
 
         similar_items = []
         seen_sim_urls = set()
@@ -1100,45 +1759,33 @@ class SerpApiShoppingService:
 
             if not title or not thumbnail or price is None:
                 continue
-            if it.get('product_id') == main_product.get('external_id'):
+            if it.get('product_id') == main_product.get('external_id') or title.lower() == (main_product.get('title') or '').lower():
+                continue
+            if pre_retailer.lower() == 'aurafit official':
                 continue
 
-            # 1. STRICT IMAGE VALIDATION
-            img_ok, img_reason = ProductValidator.validate_image(thumbnail)
+            # 1. Retailer filter
+            ret_ok, _ = validate_retailer(pre_retailer, req_ret)
+            if not ret_ok:
+                continue
+
+            # 2. Strict image validation
+            img_ok, _ = ProductValidator.validate_image(thumbnail)
             if not img_ok:
-                log_filter_decision(
-                    title=title,
-                    retailer=pre_retailer,
-                    detected_gender="unknown",
-                    requested_gender=norm_gender,
-                    detected_category=det_cat,
-                    requested_category=target_category,
-                    decision="REJECT",
-                    reason=f"invalid image ({img_reason})"
-                )
                 continue
 
-            # 2. STRICT GENDER VALIDATION VIA SCORING
-            gender_ok, det_gender, g_reason = ProductValidator.is_gender_compatible(
+            # 3. Strict gender validation
+            det_gender = detect_product_gender(it)
+            gender_ok, det_gender, _ = ProductValidator.is_gender_compatible(
                 product=it,
                 target_gender=norm_gender,
                 target_category=target_category
             )
             if not gender_ok:
-                log_filter_decision(
-                    title=title,
-                    retailer=pre_retailer,
-                    detected_gender=det_gender,
-                    requested_gender=norm_gender,
-                    detected_category=det_cat,
-                    requested_category=target_category,
-                    decision="REJECT",
-                    reason=g_reason
-                )
                 continue
 
-            # 3. STRICT CATEGORY VALIDATION
-            cat_ok, c_reason = ProductValidator.validate_category(
+            # 4. Strict category validation
+            cat_ok, _ = ProductValidator.validate_category(
                 title=title,
                 description=it.get('snippet', '') or it.get('description', ''),
                 category=it.get('category', ''),
@@ -1146,39 +1793,32 @@ class SerpApiShoppingService:
                 target_gender=norm_gender
             )
             if not cat_ok:
-                log_filter_decision(
-                    title=title,
-                    retailer=pre_retailer,
-                    detected_gender=det_gender,
-                    requested_gender=norm_gender,
-                    detected_category=det_cat,
-                    requested_category=target_category,
-                    decision="REJECT",
-                    reason=c_reason
-                )
                 continue
 
-            pre_retailer = self.clean_retailer_name(it.get('source'))
-            if seen_sim_retailers.get(pre_retailer, 0) >= 2:
+            # 5. Price validation
+            live_price = float(price)
+            price_ok, _ = validate_price(live_price, min_p, max_p)
+            if not price_ok:
                 continue
 
-            store_offer = self.resolve_immersive_store_offer(it)
+            # 6. Fast direct URL extraction
+            cand = self.unwrap_and_clean_url(it.get('link') or it.get('product_link'))
             direct_url = None
-            raw_source = it.get('source') or 'Online Store'
-            final_price = float(price)
-            original_price = it.get('extracted_old_price')
+            resolved_source = raw_source
+            original_price = it.get('extracted_old_price') or it.get('extracted_original_price')
 
-            if store_offer:
-                direct_url = store_offer['direct_url']
-                raw_source = store_offer['store_name']
-                if store_offer.get('price'):
-                    final_price = float(store_offer['price'])
-                if store_offer.get('original_price'):
-                    original_price = float(store_offer['original_price'])
-            else:
-                cand = self.unwrap_and_clean_url(it.get('link') or it.get('product_link'))
-                if cand and self.is_valid_direct_url(cand):
-                    direct_url = cand
+            if cand and self.is_valid_direct_url(cand):
+                direct_url = cand
+            elif it.get('immersive_product_page_token'):
+                store_offer = self.resolve_immersive_store_offer(it)
+                if store_offer and store_offer.get('direct_url'):
+                    direct_url = store_offer['direct_url']
+                    if store_offer.get('price'):
+                        live_price = float(store_offer['price'])
+                    if store_offer.get('store_name'):
+                        resolved_source = store_offer['store_name']
+                    if store_offer.get('original_price'):
+                        original_price = float(store_offer['original_price'])
 
             if not direct_url or not self.is_valid_direct_url(direct_url):
                 continue
@@ -1186,29 +1826,36 @@ class SerpApiShoppingService:
                 continue
             seen_sim_urls.add(direct_url)
 
-            retailer_name = self.clean_retailer_name(raw_source)
-            if seen_sim_retailers.get(retailer_name, 0) >= 2:
+            final_retailer = self.clean_retailer_name(resolved_source)
+            if final_retailer.lower() == 'aurafit official':
                 continue
-            seen_sim_retailers[retailer_name] = seen_sim_retailers.get(retailer_name, 0) + 1
+
+            ret_ok2, _ = validate_retailer(final_retailer, req_ret)
+            if not ret_ok2:
+                continue
+
+            if not req_ret and seen_sim_retailers.get(final_retailer, 0) >= 2:
+                continue
+            seen_sim_retailers[final_retailer] = seen_sim_retailers.get(final_retailer, 0) + 1
 
             discount_str = None
-            if original_price and original_price > final_price:
-                discount_pct = round((1 - (final_price / original_price)) * 100)
+            if original_price and original_price > live_price:
+                discount_pct = round((1 - (live_price / original_price)) * 100)
                 if discount_pct > 0:
                     discount_str = f"{discount_pct}% OFF"
 
-            sim_ext_id = self.generate_stable_external_id(it, direct_url, retailer_name, is_similar=True)
+            sim_ext_id = self.generate_stable_external_id(it, direct_url, final_retailer, is_similar=True)
             outfit_record = self._persist_live_outfit(
                 external_id=sim_ext_id,
                 title=title,
-                brand=it.get('brand') or retailer_name,
-                retailer=retailer_name,
+                brand=it.get('brand') or final_retailer,
+                retailer=final_retailer,
                 image_url=thumbnail,
-                price=final_price,
+                price=live_price,
                 original_price=original_price,
                 discount=discount_str,
                 product_url=direct_url,
-                gender=norm_gender,
+                gender=det_gender if det_gender in ('female', 'male', 'unisex') else norm_gender,
                 category=target_category,
                 occasion=OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
                 season='all',
@@ -1216,21 +1863,12 @@ class SerpApiShoppingService:
                 additional_images=it.get('thumbnails') or []
             )
 
-            sim_dict = outfit_record.to_dict()
-            sim_dict['title'] = outfit_record.name
-            sim_dict['shopping_links'] = { retailer_name.lower().replace(' ', ''): direct_url }
-            similar_items.append(sim_dict)
-
-            log_filter_decision(
-                title=title,
-                retailer=retailer_name,
-                detected_gender=det_gender,
-                requested_gender=norm_gender,
-                detected_category=det_cat,
-                requested_category=target_category,
-                decision="ACCEPT",
-                reason=f"valid similar {norm_gender} {target_category} with direct retailer URL"
-            )
+            if outfit_record:
+                sim_dict = outfit_record.to_dict()
+                sim_dict['title'] = outfit_record.name
+                sim_dict['availability'] = "IN STOCK"
+                sim_dict['shopping_links'] = { final_retailer.lower().replace(' ', ''): direct_url }
+                similar_items.append(sim_dict)
 
             if len(similar_items) >= limit:
                 break

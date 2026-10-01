@@ -27,7 +27,11 @@ def generate_recommendations():
         # Get parameters
         occasion = data.get('occasion', 'casual')
         season = data.get('season', 'all')
-        limit = data.get('limit', 10)
+        limit = int(data.get('results') or data.get('limit') or 25)
+        min_price = data.get('min_price')
+        max_price = data.get('max_price')
+        price_range = data.get('price_range')
+        retailer = data.get('retailer')
         
         # Initialize recommendation engine
         engine = RecommendationEngine()
@@ -39,7 +43,11 @@ def generate_recommendations():
             preferences=preferences,
             occasion=occasion,
             season=season,
-            limit=limit
+            limit=limit,
+            min_price=min_price,
+            max_price=max_price,
+            price_range=price_range,
+            retailer=retailer
         )
         similar = getattr(engine, 'last_similar_recommendations', [])
         

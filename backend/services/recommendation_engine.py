@@ -1,5 +1,5 @@
 import urllib.parse
-from typing import List, Dict, TYPE_CHECKING
+from typing import List, Dict, Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from models.user import User, UserProfile, StylePreference
@@ -126,7 +126,11 @@ class RecommendationEngine:
         preferences: 'StylePreference',
         occasion: str,
         season: str,
-        limit: int = 10,
+        limit: int = 25,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        price_range: Optional[str] = None,
+        retailer: Optional[str] = None,
     ) -> List[Dict]:
         """Generate personalized outfit recommendations using hybrid filtering."""
         from models.outfit import Outfit, Recommendation
@@ -157,7 +161,11 @@ class RecommendationEngine:
                 season=season,
                 compatible_colors=compatible_colors,
                 target_category=target_category,
-                limit=limit
+                limit=limit,
+                min_price=min_price,
+                max_price=max_price,
+                price_range=price_range,
+                retailer=retailer
             )
             if live_products:
                 scored = []
@@ -178,10 +186,11 @@ class RecommendationEngine:
                 scored.sort(key=lambda x: x['overall_score'], reverse=True)
                 top = scored[:limit]
 
-                # Fetch similar live recommendations from SerpApi
+                # Fetch similar live recommendations from SerpApi with matching price & retailer filters
                 if top:
                     self.last_similar_recommendations = shopping_service.fetch_similar_live_products(
-                        top[0]['outfit'], profile, limit=4
+                        top[0]['outfit'], profile, limit=4,
+                        min_price=min_price, max_price=max_price, price_range=price_range, retailer=retailer
                     )
                 else:
                     self.last_similar_recommendations = []
