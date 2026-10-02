@@ -187,16 +187,26 @@ class RecommendationEngine:
                 top = scored[:limit]
 
                 # Instant similar live recommendations:
-                # Reuse validated scored candidates from the candidate pool for instantaneous 0ms response
-                if len(scored) > limit:
-                    self.last_similar_recommendations = [s['outfit'] for s in scored[limit:limit+4]]
-                elif len(scored) > 1:
-                    self.last_similar_recommendations = [s['outfit'] for s in scored[1:min(5, len(scored))]]
+                # Ensure similar recommendations NEVER duplicate any product or image from top recommendations
+                top_images = {s['outfit'].get('image_url') for s in top if s.get('outfit', {}).get('image_url')}
+                top_urls = {s['outfit'].get('product_url') for s in top if s.get('outfit', {}).get('product_url')}
+
+                remaining_candidates = [
+                    s['outfit'] for s in scored[limit:]
+                    if s['outfit'].get('image_url') not in top_images and s['outfit'].get('product_url') not in top_urls
+                ]
+
+                if len(remaining_candidates) >= 4:
+                    self.last_similar_recommendations = remaining_candidates[:4]
                 elif top:
-                    self.last_similar_recommendations = shopping_service.fetch_similar_live_products(
-                        top[0]['outfit'], profile, limit=4,
+                    fetched_sim = shopping_service.fetch_similar_live_products(
+                        top[0]['outfit'], profile, limit=6,
                         min_price=min_price, max_price=max_price, price_range=price_range, retailer=retailer
                     )
+                    self.last_similar_recommendations = [
+                        sim for sim in fetched_sim
+                        if sim.get('image_url') not in top_images and sim.get('product_url') not in top_urls
+                    ][:4]
                 else:
                     self.last_similar_recommendations = []
 

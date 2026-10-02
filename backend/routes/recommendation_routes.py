@@ -135,22 +135,45 @@ def get_collections():
         engine = RecommendationEngine()
 
         def gender_filter(query):
+            query = query.filter(
+                Outfit.source.like('serpapi%'),
+                Outfit.in_stock == True,
+                Outfit.image_url.isnot(None),
+                Outfit.image_url != '',
+                Outfit.product_url.isnot(None),
+                Outfit.product_url != ''
+            )
             if gender == 'female':
                 return query.filter(Outfit.gender == 'female', Outfit.category == 'dress')
             elif gender == 'male':
                 return query.filter(Outfit.gender == 'male', Outfit.category != 'dress')
             return query
 
-        def attach_links(outfits):
+        import re
+
+        def attach_links(outfits, max_items=limit):
             result = []
+            seen_col_imgs = set()
             for o in outfits:
+                img = (o.image_url or '').strip()
+                if not img:
+                    continue
+                tbn_m = re.search(r'q=tbn:([^&]+)', img)
+                img_k = tbn_m.group(1) if tbn_m else img.split('?')[0].strip()
+                if img_k in seen_col_imgs:
+                    continue
+                seen_col_imgs.add(img_k)
+
                 d = o.to_dict()
                 d['shopping_links'] = engine._generate_shopping_links(o, gender)
-                if d.get('exact_product_link_available'):
+                if o.product_url:
+                    d['exact_product_link_available'] = True
                     d['shopping_url'] = o.product_url
                 else:
                     d['shopping_url'] = None
                 result.append(d)
+                if len(result) >= max_items:
+                    break
             return result
 
         from sqlalchemy import func as sqlfunc
@@ -166,22 +189,17 @@ def get_collections():
             .subquery()
         )
         trending_q = (
-            db.session.query(Outfit)
+            gender_filter(db.session.query(Outfit))
             .outerjoin(interaction_counts, Outfit.id == interaction_counts.c.outfit_id)
             .order_by(desc(interaction_counts.c.cnt), desc(Outfit.trend_score), desc(Outfit.id))
         )
-        if gender in ('male', 'female'):
-            trending_q = trending_q.filter(
-                or_(Outfit.gender == gender, Outfit.gender == 'unisex', Outfit.gender.is_(None))
-            )
-        trending = attach_links(trending_q.limit(limit).all())
-        # fallback when no interaction data yet: order by trend_score desc so
-        # we don't always get the lowest IDs
+        trending = attach_links(trending_q.limit(limit * 2).all())
+        # fallback when no interaction data yet: order by trend_score desc
         if len(trending) < 4:
             trending = attach_links(
                 gender_filter(Outfit.query)
                 .order_by(desc(Outfit.trend_score), desc(Outfit.id))
-                .limit(limit).all()
+                .limit(limit * 2).all()
             )
 
         # ── 2. Seasonal Picks ─────────────────────────────────────────────
@@ -194,13 +212,13 @@ def get_collections():
         else:
             seasonal_q = gender_filter(Outfit.query)
         # Order by created_at desc so newest outfits surface first
-        seasonal = attach_links(seasonal_q.order_by(desc(Outfit.created_at)).limit(limit).all())
+        seasonal = attach_links(seasonal_q.order_by(desc(Outfit.created_at)).limit(limit * 2).all())
 
         # ── 3. Casual Collection ──────────────────────────────────────────
         casual = attach_links(
             gender_filter(Outfit.query.filter(Outfit.occasion == 'casual'))
             .order_by(Outfit.id)
-            .limit(limit).all()
+            .limit(limit * 2).all()
         )
 
         # ── 4. Formal & Work Wear ─────────────────────────────────────────
@@ -209,7 +227,7 @@ def get_collections():
                 Outfit.query.filter(Outfit.occasion.in_(['formal', 'work']))
             )
             .order_by(desc(Outfit.trend_score), Outfit.id)
-            .limit(limit).all()
+            .limit(limit * 2).all()
         )
 
         # ── 5. Sports & Athleisure ────────────────────────────────────────
@@ -224,8 +242,14 @@ def get_collections():
                 )
             )
             .order_by(Outfit.id)
-            .limit(limit).all()
+            .limit(limit * 2).all()
         )
+        if len(sports) < 3:
+            sports = attach_links(
+                gender_filter(Outfit.query.filter(Outfit.occasion.in_(['casual', 'summer'])))
+                .order_by(desc(Outfit.id))
+                .limit(limit * 2).all()
+            )
 
         # ── 6. Minimalist Fashion ─────────────────────────────────────────
         minimalist = attach_links(
@@ -238,7 +262,7 @@ def get_collections():
                 )
             )
             .order_by(desc(Outfit.id))
-            .limit(limit).all()
+            .limit(limit * 2).all()
         )
 
         # ── 7. Party & Date Night ─────────────────────────────────────────
@@ -247,7 +271,7 @@ def get_collections():
                 Outfit.query.filter(Outfit.occasion.in_(['party', 'date']))
             )
             .order_by(desc(Outfit.trend_score), desc(Outfit.id))
-            .limit(limit).all()
+            .limit(limit * 2).all()
         )
 
         # ── 8. Based on Skin Tone ─────────────────────────────────────────

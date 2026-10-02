@@ -114,25 +114,65 @@ const Recommendations = () => {
   }, [rawRecommendations]);
 
   const recommendations = useMemo(() => {
+    const seenImages = new Set();
+    const seenUrls = new Set();
     return rawRecommendations.filter(rec => {
       const outfit = rec.outfit;
       if (!outfit) return false;
       const pOk = matchesPrice(outfit.price, priceRange, customMin, customMax);
       const r = outfit.retailer || outfit.store || outfit.brand;
       const retOk = matchesRetailer(r, selectedRetailer);
-      return pOk && retOk;
+      if (!pOk || !retOk) return false;
+
+      // Defensive image & product URL deduplication
+      const img = (outfit.image_url || outfit.image || '').trim();
+      const directUrl = (outfit.product_url || outfit.shopping_url || '').split('?')[0].trim();
+      if (img) {
+        const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
+        if (seenImages.has(imgKey)) return false;
+        seenImages.add(imgKey);
+      }
+      if (directUrl) {
+        if (seenUrls.has(directUrl)) return false;
+        seenUrls.add(directUrl);
+      }
+      return true;
     });
   }, [rawRecommendations, priceRange, customMin, customMax, selectedRetailer]);
 
   const similarRecommendations = useMemo(() => {
+    const seenImages = new Set();
+    const seenUrls = new Set();
+    // Exclude images already present in main recommendations
+    recommendations.forEach(rec => {
+      const img = (rec.outfit?.image_url || rec.outfit?.image || '').trim();
+      if (img) {
+        const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
+        seenImages.add(imgKey);
+      }
+    });
+
     return rawSimilarRecommendations.filter(outfit => {
       if (!outfit) return false;
       const pOk = matchesPrice(outfit.price, priceRange, customMin, customMax);
       const r = outfit.retailer || outfit.store || outfit.brand;
       const retOk = matchesRetailer(r, selectedRetailer);
-      return pOk && retOk;
+      if (!pOk || !retOk) return false;
+
+      const img = (outfit.image_url || outfit.image || '').trim();
+      const directUrl = (outfit.product_url || outfit.shopping_url || '').split('?')[0].trim();
+      if (img) {
+        const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
+        if (seenImages.has(imgKey)) return false;
+        seenImages.add(imgKey);
+      }
+      if (directUrl) {
+        if (seenUrls.has(directUrl)) return false;
+        seenUrls.add(directUrl);
+      }
+      return true;
     });
-  }, [rawSimilarRecommendations, priceRange, customMin, customMax, selectedRetailer]);
+  }, [rawSimilarRecommendations, recommendations, priceRange, customMin, customMax, selectedRetailer]);
 
 
   useEffect(() => {
@@ -474,8 +514,22 @@ const Recommendations = () => {
           </motion.button>
         </motion.div>
 
+        {/* Loading State Section (Section 24) */}
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white border border-gray-200 p-12 text-center shadow-sm mb-12"
+          >
+            <HiOutlineSparkles className="text-6xl text-amber-500 mx-auto mb-4 animate-spin" />
+            <h3 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">Finding live dresses...</h3>
+            <p className="text-gray-600 text-sm font-light mb-1">Searching available retailers across India...</p>
+            <p className="text-gray-400 text-xs font-light">Matching your style, occasion, and skin-tone colors</p>
+          </motion.div>
+        )}
+
         {/* Results Section */}
-        {recommendations.length > 0 && (
+        {recommendations.length > 0 && !loading && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -892,7 +946,19 @@ const Recommendations = () => {
                       className="flex gap-5 pb-4 items-stretch"
                       style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                     >
-                      {outfits.filter(outfit => !failedImages.has(outfit.id)).map((outfit, idx) => (
+                      {(() => {
+                        const seenRowImgs = new Set();
+                        return outfits
+                          .filter(outfit => {
+                            if (failedImages.has(outfit.id)) return false;
+                            const img = (outfit.image_url || outfit.image || '').trim();
+                            if (!img) return false;
+                            const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
+                            if (seenRowImgs.has(imgKey)) return false;
+                            seenRowImgs.add(imgKey);
+                            return true;
+                          })
+                          .map((outfit, idx) => (
                         <motion.div
                           key={outfit.id}
                           initial={{ opacity: 0, x: 20 }}
@@ -1026,7 +1092,8 @@ const Recommendations = () => {
                             </div>
                           </div>
                         </motion.div>
-                      ))}
+                      ));
+                    })()}
                     </div>
                   </div>
                 );

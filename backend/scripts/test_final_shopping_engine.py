@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import re
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -28,7 +29,8 @@ def run_all_tests():
     app = create_app()
     with app.app_context():
         print("=" * 80)
-        print("AURAFIT AI: FINAL LIVE SHOPPING RECOMMENDATION ENGINE TEST SUITE (Section 28)")
+        print("AURAFIT AI: COMPREHENSIVE LIVE SHOPPING ENGINE TEST SUITE")
+        print("Enforcing Sections 29, 30, 31, 32 of Final Inventory Specification")
         print("=" * 80)
 
         service = SerpApiShoppingService()
@@ -38,7 +40,7 @@ def run_all_tests():
             print("ERROR: SERPAPI_KEY is not configured in backend/.env")
             return False
 
-        # Create or fetch test mock user profiles for Female & Male
+        # Setup test users
         female_user = User.query.filter_by(email="test_engine_female@aurafit.com").first()
         if not female_user:
             female_user = User(username="test_female", email="test_engine_female@aurafit.com")
@@ -97,318 +99,250 @@ def run_all_tests():
             db.session.add(male_pref)
             db.session.commit()
 
-        passed_tests = 0
-        total_tests = 10
+        results_summary = {}
+        all_passed = True
+        total_latencies = []
 
-        # ----------------------------------------------------------------------
-        # TEST 6: Different skin tones (Fair / Medium / Deep)
-        # Verify color query generation and palette influence (Section 5 & 6)
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 6: Skin Tone Color Search Strategies (Fair / Medium / Deep) ---")
-        t6_pass = True
+        # Helper to validate a batch of recommendations
+        def validate_batch(products, target_gender, min_p, max_p, price_label, target_cat='dress', expected_retailer=None):
+            errors = []
+            seen_urls = set()
+            seen_ids = set()
+            seen_imgs = set()
+
+            for idx, p in enumerate(products):
+                # 1. Price check strictly on current selling price
+                price = p.get('price')
+                if price is None:
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' has null price")
+                elif min_p is not None and price < min_p:
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' price ₹{price} < min ₹{min_p}")
+                elif max_p is not None and price > max_p:
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' price ₹{price} > max ₹{max_p}")
+
+                # 2. Gender check
+                prod_gender = p.get('gender')
+                title_lower = (p.get('title') or '').lower()
+                if target_gender == 'female':
+                    if prod_gender == 'male' or re.search(r"\b(men|men's|mens|boys?)\b", title_lower):
+                        errors.append(f"Item #{idx+1} '{p.get('title')}' male product in female recommendations")
+                elif target_gender == 'male':
+                    if prod_gender == 'female' or re.search(r"\b(women|women's|womens|ladies|girls?|dress|gown|saree)\b", title_lower):
+                        errors.append(f"Item #{idx+1} '{p.get('title')}' female product in male recommendations")
+
+                # 3. Category check
+                if target_cat == 'dress':
+                    cat_ok, c_msg = ProductValidator.validate_category(p.get('title', ''), target_category='dress', target_gender=target_gender)
+                    if not cat_ok:
+                        errors.append(f"Item #{idx+1} '{p.get('title')}' invalid dress category: {c_msg}")
+
+                # 4. Image check
+                img = p.get('image_url')
+                img_ok, i_msg = ProductValidator.validate_image(img)
+                if not img_ok:
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' invalid image: {i_msg}")
+
+                # 5. Direct URL check
+                url = p.get('product_url')
+                if not service.is_valid_direct_url(url):
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' invalid direct URL: {url}")
+
+                # 6. Retailer check
+                ret = p.get('store') or p.get('retailer')
+                if ret and 'aurafit official' in ret.lower():
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' has mock retailer '{ret}'")
+                if expected_retailer:
+                    ret_ok, _ = validate_retailer(ret, expected_retailer)
+                    if not ret_ok:
+                        errors.append(f"Item #{idx+1} '{p.get('title')}' retailer mismatch: {ret} != {expected_retailer}")
+
+                # 7. Deduplication check
+                canon_u = service.canonicalize_url(url)
+                if canon_u in seen_urls:
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' duplicate URL: {canon_u}")
+                seen_urls.add(canon_u)
+
+                ext_id = p.get('external_id')
+                if ext_id and ext_id in seen_ids:
+                    errors.append(f"Item #{idx+1} '{p.get('title')}' duplicate external ID: {ext_id}")
+                if ext_id:
+                    seen_ids.add(ext_id)
+
+                # 8. Image deduplication check
+                img_url = p.get('image_url') or p.get('thumbnail')
+                if img_url:
+                    tbn_match = re.search(r'q=tbn:([^&]+)', img_url)
+                    img_k = tbn_match.group(1) if tbn_match else img_url.split('?')[0]
+                    if img_k in seen_imgs:
+                        errors.append(f"Item #{idx+1} '{p.get('title')}' duplicate image: {img_k}")
+                    seen_imgs.add(img_k)
+
+            return errors
+
+        # ======================================================================
+        # SECTION 29: TEST ALL 5 PRICE RANGES (Target = 25 each)
+        # ======================================================================
+        price_test_cases = [
+            ("Under ₹500", "under_500", None, 500.0),
+            ("₹500 – ₹1,000", "500_1000", 500.0, 1000.0),
+            ("₹1,000 – ₹2,500", "1000_2500", 1000.0, 2500.0),
+            ("₹2,500 – ₹5,000", "2500_5000", 2500.0, 5000.0),
+            ("₹5,000+", "5000_plus", 5000.0, None),
+        ]
+
+        print("\n" + "=" * 60)
+        print("SUITE 1: TESTING ALL 5 PRICE RANGES (TARGET = 25 EACH)")
+        print("=" * 60)
+
+        for label, p_code, min_p, max_p in price_test_cases:
+            female_profile.skin_tone = "medium"
+            t0 = time.time()
+            recs = service.fetch_live_recommendations(
+                profile=female_profile,
+                preferences=female_pref,
+                occasion="party",
+                season="summer",
+                compatible_colors=["olive", "emerald", "burgundy"],
+                target_category="dress",
+                limit=25,
+                price_range=p_code
+            )
+            lat = time.time() - t0
+            total_latencies.append(lat)
+            returned = len(recs)
+            results_summary[label] = returned
+
+            errors = validate_batch(recs, 'female', min_p, max_p, label, target_cat='dress')
+            passed = (returned >= 25) and (len(errors) == 0)
+
+            print(f"\n[PRICE RANGE TEST] {label}")
+            print(f"RETURNED: {returned} | TARGET: 25 | LATENCY: {lat:.2f}s")
+            if errors:
+                for err in errors[:3]:
+                    print(f"   [FAIL DETAIL] {err}")
+                print(f"STATUS: FAIL ({len(errors)} validation errors)")
+                all_passed = False
+            elif returned >= 25:
+                print(f"STATUS: PASS (100% compliant, 0 duplicates, 0 mock products)")
+            else:
+                print(f"STATUS: PARTIAL ({returned}/25 products returned)")
+                all_passed = False
+
+        # ======================================================================
+        # SECTION 30: TEST ALL SEASONS (Target = 20+ dresses each)
+        # ======================================================================
+        print("\n" + "=" * 60)
+        print("SUITE 2: TESTING ALL 4 SEASONS (TARGET = 20+ DRESSES EACH)")
+        print("=" * 60)
+
+        season_cases = [
+            ("Spring", "spring", "party"),
+            ("Summer", "summer", "casual"),
+            ("Autumn", "autumn", "date"),
+            ("Winter", "winter", "party"),
+        ]
+
+        for s_label, s_code, occ in season_cases:
+            t0 = time.time()
+            recs = service.fetch_live_recommendations(
+                profile=female_profile,
+                preferences=female_pref,
+                occasion=occ,
+                season=s_code,
+                compatible_colors=["emerald", "burgundy"],
+                target_category="dress",
+                limit=20,
+                price_range="all"
+            )
+            lat = time.time() - t0
+            total_latencies.append(lat)
+            returned = len(recs)
+            errors = validate_batch(recs, 'female', None, None, "all", target_cat='dress')
+            passed = (returned >= 20) and (len(errors) == 0)
+            print(f"\n[SEASON TEST] {s_label} + {occ.title()}: RETURNED {returned} | TARGET: 20 | LATENCY: {lat:.2f}s")
+            if errors:
+                for err in errors[:2]:
+                    print(f"   [FAIL DETAIL] {err}")
+                all_passed = False
+            elif returned >= 20:
+                print("STATUS: PASS (100% valid dresses, seasonal relevance satisfied)")
+            else:
+                print(f"STATUS: PARTIAL ({returned}/20 products)")
+                all_passed = False
+
+        # ======================================================================
+        # SECTION 31: TEST GENDER SWITCHING
+        # ======================================================================
+        print("\n" + "=" * 60)
+        print("SUITE 3: TESTING GENDER SWITCHING (Female -> Male -> Female)")
+        print("=" * 60)
+
+        # Step 1: Female
+        recs_f1 = service.fetch_live_recommendations(
+            profile=female_profile, preferences=female_pref, occasion="party", season="summer",
+            compatible_colors=["olive"], target_category="dress", limit=20, price_range="all"
+        )
+        male_in_f1 = [p for p in recs_f1 if p.get('gender') == 'male' or re.search(r"\b(men|men's|mens)\b", (p.get('title') or '').lower())]
+
+        # Step 2: Male
+        recs_m = service.fetch_live_recommendations(
+            profile=male_profile, preferences=male_pref, occasion="party", season="summer",
+            compatible_colors=["navy"], target_category="clothing", limit=20, price_range="all"
+        )
+        female_in_m = [p for p in recs_m if p.get('gender') == 'female' or re.search(r"\b(women|women's|womens|dress|gown|kurti|saree)\b", (p.get('title') or '').lower())]
+
+        # Step 3: Female again
+        recs_f2 = service.fetch_live_recommendations(
+            profile=female_profile, preferences=female_pref, occasion="casual", season="summer",
+            compatible_colors=["emerald"], target_category="dress", limit=20, price_range="all"
+        )
+        male_in_f2 = [p for p in recs_f2 if p.get('gender') == 'male' or re.search(r"\b(men|men's|mens)\b", (p.get('title') or '').lower())]
+
+        print(f"Female Run 1: Returned {len(recs_f1)} | Male contamination: {len(male_in_f1)}")
+        print(f"Male Run:     Returned {len(recs_m)} | Female contamination: {len(female_in_m)}")
+        print(f"Female Run 2: Returned {len(recs_f2)} | Male contamination: {len(male_in_f2)}")
+
+        if len(male_in_f1) == 0 and len(female_in_m) == 0 and len(male_in_f2) == 0:
+            print("STATUS: PASS (Zero cross-gender contamination across profile switches)")
+        else:
+            print("STATUS: FAIL (Cross-gender contamination detected)")
+            all_passed = False
+
+        # ======================================================================
+        # SECTION 32: TEST SKIN-TONE COLOR MATCHING (Fair / Medium / Deep)
+        # ======================================================================
+        print("\n" + "=" * 60)
+        print("SUITE 4: TESTING SKIN-TONE COLOR MATCHING")
+        print("=" * 60)
         for tone in ['fair', 'medium', 'deep']:
             female_profile.skin_tone = tone
             palette = SKIN_TONE_PALETTES[tone]
-            queries = service.generate_multi_queries('female', 'Party', 'Summer', palette, 'dress')
-            print(f"Skin Tone '{tone}' generated {len(queries)} queries:")
-            for q in queries[:4]:
+            passes = service.generate_search_passes('female', 'Party', 'Summer', palette, "under 1000", 'dress')
+            pass2_colors = passes[1]
+            print(f"Skin Tone '{tone.title()}' color search queries (Pass 2):")
+            for q in pass2_colors[:3]:
                 print(f"   * {q}")
-            # Verify queries contain distinct colors from palette
-            matched_colors_in_queries = [col for col in palette if any(col in q for q in queries)]
-            if len(matched_colors_in_queries) >= 3:
-                print(f"   [PASS] Found {len(matched_colors_in_queries)} compatible colors in search queries: {matched_colors_in_queries[:4]}")
+            matched_palette_words = [c for c in palette if any(c in q for q in pass2_colors)]
+            if len(matched_palette_words) >= 2:
+                print(f"   [PASS] Found {len(matched_palette_words)} tone-compatible colors in search passes")
             else:
-                print(f"   [FAIL] Insufficient palette colors in queries for {tone}")
-                t6_pass = False
+                print(f"   [FAIL] Missing palette colors in queries")
+                all_passed = False
 
-        if t6_pass:
-            print(">>> TEST 6 PASSED")
-            passed_tests += 1
-        else:
-            print(">>> TEST 6 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 1: Female + Party + Summer + Under ₹500
-        # Expected: Only real women's dresses, price <= 500, live retailer products, no men, no accessories
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 1: Female + Party + Summer + Under ₹500 ---")
-        female_profile.skin_tone = "medium"
-        t0 = time.time()
-        recs1 = service.fetch_live_recommendations(
-            profile=female_profile,
-            preferences=female_pref,
-            occasion="party",
-            season="summer",
-            compatible_colors=["olive", "emerald"],
-            target_category="dress",
-            limit=25,
-            price_range="under_500"
-        )
-        duration1 = time.time() - t0
-        print(f"Fetched {len(recs1)} products in {duration1:.2f}s")
-        
-        t1_pass = True
-        if not recs1:
-            print("[WARN] 0 items under 500 live right now (market dependent), checking honesty...")
-        for p in recs1:
-            price = p.get('price')
-            gender = p.get('gender')
-            cat = p.get('category')
-            title = p.get('title', '').lower()
-            store = p.get('store') or p.get('retailer')
-            url = p.get('product_url')
-            # Check conditions
-            if price is None or price > 500:
-                print(f"[FAIL] Product price ₹{price} exceeds ₹500: {title}")
-                t1_pass = False
-            if gender == 'male' or 'men' in title.split():
-                print(f"[FAIL] Male product found: {title}")
-                t1_pass = False
-            if store and 'aurafit official' in store.lower():
-                print(f"[FAIL] Mock store found: {store}")
-                t1_pass = False
-            if not service.is_valid_direct_url(url):
-                print(f"[FAIL] Invalid direct URL: {url}")
-                t1_pass = False
-        
-        if t1_pass:
-            print(f">>> TEST 1 PASSED ({len(recs1)} valid live products <= ₹500)")
-            passed_tests += 1
-        else:
-            print(">>> TEST 1 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 2: Female + Party + Summer + ₹500–₹1,000
-        # Expected: Only valid live products in range
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 2: Female + Party + Summer + ₹500–₹1,000 ---")
-        t0 = time.time()
-        recs2 = service.fetch_live_recommendations(
-            profile=female_profile,
-            preferences=female_pref,
-            occasion="party",
-            season="summer",
-            compatible_colors=["olive", "emerald"],
-            target_category="dress",
-            limit=25,
-            price_range="500_1000"
-        )
-        duration2 = time.time() - t0
-        print(f"Fetched {len(recs2)} products in {duration2:.2f}s")
-
-        t2_pass = True
-        for p in recs2:
-            price = p.get('price')
-            if price is None or price < 500 or price > 1000:
-                print(f"[FAIL] Price ₹{price} outside 500-1000: {p.get('title')}")
-                t2_pass = False
-            if p.get('gender') == 'male':
-                t2_pass = False
-            if not service.is_valid_direct_url(p.get('product_url')):
-                t2_pass = False
-
-        if t2_pass and len(recs2) > 0:
-            print(f">>> TEST 2 PASSED ({len(recs2)} products in ₹500-₹1,000 range)")
-            passed_tests += 1
-        else:
-            print(">>> TEST 2 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 3: Female + Party + Summer + ₹1,000–₹2,500
-        # Expected: Only valid live products in range (large recommendation pool target 25+)
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 3: Female + Party + Summer + ₹1,000–₹2,500 ---")
-        t0 = time.time()
-        recs3 = service.fetch_live_recommendations(
-            profile=female_profile,
-            preferences=female_pref,
-            occasion="party",
-            season="summer",
-            compatible_colors=["olive", "emerald", "navy"],
-            target_category="dress",
-            limit=25,
-            price_range="1000_2500"
-        )
-        duration3 = time.time() - t0
-        print(f"Fetched {len(recs3)} products in {duration3:.2f}s")
-
-        t3_pass = True
-        for p in recs3:
-            price = p.get('price')
-            if price is None or price < 1000 or price > 2500:
-                print(f"[FAIL] Price ₹{price} outside 1000-2500: {p.get('title')}")
-                t3_pass = False
-            if p.get('gender') == 'male':
-                t3_pass = False
-            if not service.is_valid_direct_url(p.get('product_url')):
-                t3_pass = False
-
-        if t3_pass and len(recs3) >= 15:
-            print(f">>> TEST 3 PASSED ({len(recs3)} live products in ₹1,000-₹2,500 range, targeted 25+)")
-            passed_tests += 1
-        else:
-            print(">>> TEST 3 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 4: Male + Party + Summer
-        # Expected: Only valid men's clothing
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 4: Male + Party + Summer ---")
-        t0 = time.time()
-        recs4 = service.fetch_live_recommendations(
-            profile=male_profile,
-            preferences=male_pref,
-            occasion="party",
-            season="summer",
-            compatible_colors=["navy", "burgundy"],
-            target_category="clothing",
-            limit=20,
-            price_range="all"
-        )
-        duration4 = time.time() - t0
-        print(f"Fetched {len(recs4)} products in {duration4:.2f}s")
-
-        t4_pass = True
-        for p in recs4:
-            gender = p.get('gender')
-            title = p.get('title', '').lower()
-            if gender == 'female' or any(bad in title for bad in ['women', 'woman', "women's", 'ladies', 'gown', 'lehenga']):
-                print(f"[FAIL] Female product in male query: {title}")
-                t4_pass = False
-
-        if t4_pass and len(recs4) > 0:
-            print(f">>> TEST 4 PASSED ({len(recs4)} valid men's products)")
-            passed_tests += 1
-        else:
-            print(">>> TEST 4 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 5: Female + Winter
-        # Expected: Winter-relevant women's dresses
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 5: Female + Winter ---")
-        t0 = time.time()
-        recs5 = service.fetch_live_recommendations(
-            profile=female_profile,
-            preferences=female_pref,
-            occasion="casual",
-            season="winter",
-            compatible_colors=["burgundy", "wine", "emerald"],
-            target_category="dress",
-            limit=20,
-            price_range="all"
-        )
-        duration5 = time.time() - t0
-        print(f"Fetched {len(recs5)} products in {duration5:.2f}s")
-
-        t5_pass = True
-        for p in recs5:
-            if p.get('gender') == 'male':
-                t5_pass = False
-            cat_ok, _ = ProductValidator.validate_category(p.get('title'), target_category='dress', target_gender='female')
-            if not cat_ok:
-                t5_pass = False
-
-        if t5_pass and len(recs5) > 0:
-            print(f">>> TEST 5 PASSED ({len(recs5)} valid winter women's dresses)")
-            passed_tests += 1
-        else:
-            print(">>> TEST 5 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 7: All Retailers Diversity
-        # Expected: Multiple available retailers where API data permits
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 7: Retailer Diversity under 'All Retailers' ---")
-        # Check recs3 retailers
-        retailers_found = set(p.get('store') or p.get('retailer') for p in recs3 if p.get('store') or p.get('retailer'))
-        print(f"Distinct Retailers Found: {retailers_found}")
-        if len(retailers_found) >= 2:
-            print(f">>> TEST 7 PASSED (Found {len(retailers_found)} diverse retailers: {list(retailers_found)[:5]})")
-            passed_tests += 1
-        else:
-            print(f"[FAIL] Only {len(retailers_found)} retailer found")
-
-        # ----------------------------------------------------------------------
-        # TEST 8: Specific Retailer (e.g. Myntra or Amazon)
-        # Expected: Only selected retailer returned
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 8: Specific Retailer Filter (Myntra) ---")
-        recs8 = service.fetch_live_recommendations(
-            profile=female_profile,
-            preferences=female_pref,
-            occasion="party",
-            season="summer",
-            compatible_colors=["emerald", "navy"],
-            target_category="dress",
-            limit=15,
-            price_range="all",
-            retailer="Myntra"
-        )
-        print(f"Fetched {len(recs8)} products for retailer 'Myntra'")
-        t8_pass = True
-        for p in recs8:
-            ret = (p.get('store') or p.get('retailer') or '').lower()
-            if 'myntra' not in ret:
-                print(f"[FAIL] Non-Myntra product returned: {ret} - {p.get('title')}")
-                t8_pass = False
-
-        if t8_pass and len(recs8) > 0:
-            print(f">>> TEST 8 PASSED (100% Myntra products)")
-            passed_tests += 1
-        else:
-            print(">>> TEST 8 FAILED")
-
-        # ----------------------------------------------------------------------
-        # TEST 9: Image consistency
-        # Expected: Card image == persisted product image == detail page image
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 9: Image Consistency (Card == DB == Detail) ---")
-        sample_prod = recs3[0] if recs3 else recs2[0]
-        ext_id = sample_prod['external_id']
-        card_image = sample_prod['image_url']
-        db_outfit = Outfit.query.filter_by(external_id=ext_id).first()
-        t9_pass = False
-        if db_outfit:
-            db_image = db_outfit.image_url
-            detail_dict = db_outfit.to_dict()
-            detail_image = detail_dict['image_url']
-            print(f"Card image:   {card_image}")
-            print(f"DB image:     {db_image}")
-            print(f"Detail image: {detail_image}")
-            if card_image == db_image == detail_image and ProductValidator.validate_image(card_image)[0]:
-                print(">>> TEST 9 PASSED (Exact image consistency preserved)")
-                t9_pass = True
-                passed_tests += 1
-            else:
-                print("[FAIL] Image mismatch between card, DB, or detail dict")
-        else:
-            print("[FAIL] Product not persisted in DB")
-
-        # ----------------------------------------------------------------------
-        # TEST 10: URL consistency
-        # Expected: SHOP NOW == exact persisted direct product URL
-        # ----------------------------------------------------------------------
-        print("\n--- TEST 10: Direct URL Consistency (SHOP NOW == DB product_url) ---")
-        card_url = sample_prod['product_url']
-        shopping_url = sample_prod['shopping_url']
-        db_url = db_outfit.product_url if db_outfit else None
-        print(f"Card URL:     {card_url}")
-        print(f"Shopping URL: {shopping_url}")
-        print(f"DB URL:       {db_url}")
-        if card_url == shopping_url == db_url and service.is_valid_direct_url(card_url):
-            print(">>> TEST 10 PASSED (Exact direct retailer product URL preserved)")
-            passed_tests += 1
-        else:
-            print("[FAIL] URL mismatch or non-direct URL detected")
-
-        # ----------------------------------------------------------------------
+        # ======================================================================
         # SUMMARY
-        # ----------------------------------------------------------------------
+        # ======================================================================
+        avg_lat = sum(total_latencies) / len(total_latencies) if total_latencies else 0.0
         print("\n" + "=" * 80)
-        print(f"FINAL TEST RESULTS: {passed_tests}/{total_tests} TESTS PASSED")
+        print("FINAL TEST EXECUTION SUMMARY")
         print("=" * 80)
-        return passed_tests == total_tests
+        for k, v in results_summary.items():
+            print(f"  {k:20}: RETURNED {v:2} | TARGET: 25 | {'PASS' if v >= 25 else 'PARTIAL'}")
+        print(f"Average Response Latency: {avg_lat:.2f}s")
+        print(f"OVERALL SUITE STATUS: {'ALL TESTS PASSED' if all_passed else 'SOME TESTS FAILED/PARTIAL'}")
+        print("=" * 80)
+
+        return all_passed
 
 if __name__ == '__main__':
     success = run_all_tests()

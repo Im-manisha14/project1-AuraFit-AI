@@ -96,6 +96,7 @@ class ProductValidator:
         r"\bkurti\b", r"\bkurtis\b", r"\banarkali\b", r"\blehenga\b", r"\bsaree\b", r"\bsari\b",
         r"\bblouse\b", r"\bbra\b", r"\blingerie\b", r"\bmaxi\b", r"\bmidi\b", r"\bmini dress\b",
         r"\bbodycon\b", r"\bwrap dress\b", r"\bparty dress\b", r"\bsummer dress\b",
+        r"\bsundress\b", r"\bsundresses\b",
     ]
 
     # Inherently male garments
@@ -112,8 +113,8 @@ class ProductValidator:
         r'\bfit (and|&) flare dress\b', r'\bshirt dress\b', r'\bslip dress\b', r'\btiered dress\b',
         r'\bskater dress\b', r'\bhalter dress\b', r'\bsheath dress\b', r'\bshift dress\b',
         r'\bprom dress\b', r'\bwedding dress\b', r'\bruffle dress\b', r'\bcut-?out dress\b',
-        r'\bdress\b', r'\bdresses\b', r'\bgown\b', r'\bgowns\b', r'\bkurti\b', r'\bkurtis\b',
-        r'\banarkali\b', r'\blehenga\b', r'\bsaree\b', r'\bsari\b',
+        r'\bdress\b', r'\bdresses\b', r'\bsundress\b', r'\bsundresses\b', r'\bgown\b', r'\bgowns\b',
+        r'\bkurti\b', r'\bkurtis\b', r'\banarkali\b', r'\blehenga\b', r'\bsaree\b', r'\bsari\b',
     ]
 
     # Explicit excluded categories that must NEVER be returned when category is dress
@@ -125,7 +126,7 @@ class ProductValidator:
         r'\b(watches?|smartwatch|earrings?|necklaces?|bracelets?|bangles?|jewelry|jewellery|rings?|anklet|pendant)\b',
         r'\b(sunglasses|glasses|hats?|caps?|scarf|scarves|socks?)\b',
         r'\b(t-shirts?|tshirts?|tee|tees)\b',
-        r'\b(trousers?|pants?|jeans?|shorts?|leggings?|trackpants?)\b',
+        r'\b(trousers?|pants?|jeans?|shorts|leggings?|trackpants?)\b',
         r'\b(skirts?)\b',
         r'\b(bras?|panties|lingerie|underwear)\b',
         r'\b(towels?|bath\s*towel|bathrobe|nighty|nightwear|sleepwear|bath)\b',
@@ -297,8 +298,10 @@ class ProductValidator:
         if norm_gender == 'female' or target_category == 'dress':
             # Check false positives & excluded non-dress products first
             for exp in cls.EXCLUDED_DRESS_PATTERNS:
-                # Exception: "shirt dress" is a valid dress style
+                # Exception: "shirt dress" and "t-shirt dress" are valid dress styles
                 if exp == r'\b(shirts?)\b' and 'shirt dress' in t:
+                    continue
+                if 't-shirt' in exp and any(td in t for td in ['t-shirt dress', 'tshirt dress', 'tee dress']):
                     continue
                 if re.search(exp, t):
                     return False, f'non-dress product category matched ({exp})'
@@ -513,17 +516,35 @@ def validate_price(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None
 ) -> Tuple[bool, str]:
-    """Validates that price is within the specified min/max range."""
+    """Validates that price is within the specified min/max range strictly on current selling price."""
     if price is None:
         return False, "NO"
-    if min_price is not None and price < min_price:
+    try:
+        p = float(price)
+    except (ValueError, TypeError):
         return False, "NO"
-    if max_price is not None and price > max_price:
+    if p <= 0:
+        return False, "NO"
+    if min_price is not None and p < min_price:
+        return False, "NO"
+    if max_price is not None and p > max_price:
         return False, "NO"
     return True, "YES"
 
 
 ProductValidator.validate_price = staticmethod(validate_price)
+
+
+def get_price_query_cue(price_range: Optional[str] = None, min_price: Optional[float] = None, max_price: Optional[float] = None) -> str:
+    """Returns search query price terms to guide SerpApi Google Shopping."""
+    min_p, max_p, _ = parse_price_range(price_range, min_price, max_price)
+    if min_p is None and max_p is not None:
+        return f"under {int(max_p)}"
+    elif min_p is not None and max_p is not None:
+        return f"{int(min_p)} to {int(max_p)}"
+    elif min_p is not None and max_p is None:
+        return f"above {int(min_p)}"
+    return ""
 
 
 def validate_retailer(
@@ -710,6 +731,49 @@ def log_shopping_summary(
     )
 
 
+def log_shopping_inventory(
+    gender: str,
+    skin_tone: str,
+    occasion: str,
+    season: str,
+    price_range: str,
+    requested: int,
+    candidates: int,
+    gender_valid: int,
+    dress_valid: int,
+    image_valid: int,
+    price_valid: int,
+    direct_url_valid: int,
+    after_dedup: int,
+    final_result: int
+):
+    """Outputs standardized [SHOPPING INVENTORY] diagnostics matching Section 23."""
+    _safe_print(
+        f"\n[SHOPPING INVENTORY]\n"
+        f"Gender: {gender}\n"
+        f"Skin Tone: {skin_tone}\n"
+        f"Occasion: {occasion}\n"
+        f"Season: {season}\n"
+        f"Price Range: {price_range}\n"
+        f"Requested: {requested}\n\n"
+        f"SerpApi Candidates: {candidates}\n"
+        f"Gender Valid: {gender_valid}\n"
+        f"Dress Valid: {dress_valid}\n"
+        f"Image Valid: {image_valid}\n"
+        f"Price Valid: {price_valid}\n"
+        f"Direct URL Valid: {direct_url_valid}\n"
+        f"After Deduplication: {after_dedup}\n\n"
+        f"FINAL RESULT: {final_result}"
+    )
+    if final_result < requested:
+        _safe_print(
+            f"\n[SHOPPING INVENTORY]\n"
+            f"Requested: {requested}\n"
+            f"Final genuine products: {final_result}\n"
+            f"Status: INSUFFICIENT LIVE INVENTORY"
+        )
+
+
 # ==============================================================================
 # CACHE
 # ==============================================================================
@@ -768,6 +832,12 @@ class SerpApiShoppingService:
 
     def __init__(self):
         self.api_key = os.environ.get('SERPAPI_KEY') or os.environ.get('SERP_API_KEY')
+        if not self.api_key:
+            from dotenv import load_dotenv
+            env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
+            if os.path.exists(env_path):
+                load_dotenv(env_path, override=True)
+                self.api_key = os.environ.get('SERPAPI_KEY') or os.environ.get('SERP_API_KEY')
         self.base_url = "https://serpapi.com/search"
         self.retailer_manager = MultiRetailerShoppingManager()
         self.last_fetch_stats: Dict[str, int] = {}
@@ -778,6 +848,51 @@ class SerpApiShoppingService:
     # ------------------------------------------------------------------
     # URL Cleaning & Unwrapping
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def canonicalize_url(raw_url: Optional[str]) -> str:
+        """
+        Strips tracking query parameters and canonicalizes retailer product URLs for deduplication.
+        """
+        if not raw_url or not isinstance(raw_url, str):
+            return ""
+        cand = raw_url.strip()
+        try:
+            parsed = urllib.parse.urlparse(cand)
+            tracking_params = {
+                'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+                'srsltid', 'gclid', 'fbclid', 'source', 'ref_', 'psc', 'tag',
+                'pf_rd_r', 'pf_rd_p', 'pf_rd_m', 'pf_rd_s', 'pf_rd_t', 'pf_rd_i',
+                'pd_rd_r', 'pd_rd_w', 'pd_rd_wg', 'linkcode', 'camp', 'creative', 'ref',
+                'spm', '_x_tr_sl', '_x_tr_tl', '_x_tr_hl'
+            }
+            qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=False)
+            cleaned_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params and not k.lower().startswith('utm_')}
+            new_query = urllib.parse.urlencode(cleaned_qs, doseq=True)
+            clean_path = parsed.path
+            
+            # Amazon ASIN canonicalization
+            asin_match = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', clean_path, re.IGNORECASE)
+            if 'amazon' in parsed.netloc.lower() and asin_match:
+                asin = asin_match.group(1).upper()
+                return f"https://www.amazon.in/dp/{asin}"
+
+            # Myntra canonicalization: /productId/buy
+            if 'myntra' in parsed.netloc.lower():
+                m_id = re.search(r'/(\d+)/buy', clean_path)
+                if m_id:
+                    return f"https://www.myntra.com/{m_id.group(1)}/buy"
+
+            return urllib.parse.urlunparse((
+                parsed.scheme or 'https',
+                parsed.netloc.lower(),
+                clean_path.rstrip('/'),
+                parsed.params,
+                new_query,
+                ''
+            ))
+        except Exception:
+            return cand
 
     @staticmethod
     def unwrap_and_clean_url(raw_url: Optional[str]) -> Optional[str]:
@@ -808,12 +923,19 @@ class SerpApiShoppingService:
         # Reject search query URLs
         if any(sp in u for sp in [
             'amazon.in/s?', 'amazon.com/s?', 'amazon.in/s/', 'amazon.com/s/',
-            '/search?', '/search/', 'rawquery=', '?q=', '&q=', 'searchterm='
+            '/search?', '/search/', 'rawquery=', '?q=', '&q=', 'searchterm=', '/s?k='
         ]):
             return False
         # Reject Google Shopping search pages
         if any(gp in u for gp in ['google.com/shopping', 'google.com/search', 'google.com/url?']):
             return False
+        # Reject root domain homepages
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if not parsed.path or parsed.path.strip('/') == '':
+                return False
+        except Exception:
+            pass
         return True
 
     @staticmethod
@@ -1003,18 +1125,19 @@ class SerpApiShoppingService:
     # Multi-Query Search Strategy & Parallel Execution (Sections 5, 6, 15)
     # ------------------------------------------------------------------
 
-    def generate_multi_queries(
+    def generate_search_passes(
         self,
         norm_gender: str,
         occasion: str,
         season: str,
-        skin_palette: List[str],
-        target_category: str = 'dress'
-    ) -> List[str]:
+        palette: List[str],
+        price_cue: str = "",
+        target_category: str = 'dress',
+        retailer: Optional[str] = None
+    ) -> List[List[str]]:
         """
-        Builds a multi-query search set for parallel SerpApi execution (Section 6).
-        Includes base query, multiple compatible colors matching skin tone palette (Section 5),
-        and dress style variations (midi, maxi, wrap, fit and flare, a-line, bodycon, cocktail).
+        Controlled Multi-Pass Search Expansion (Sections 3, 5, 6, 7, 8, 17).
+        Generates structured search passes to gather live inventory up to the target.
         """
         occ_term = OCCASION_SEARCH_MAP.get((occasion or '').lower(), (occasion or '').lower())
         if occ_term == 'all':
@@ -1022,38 +1145,124 @@ class SerpApiShoppingService:
         season_term = (season or '').lower()
         if season_term in ('all', ''):
             season_term = ''
+        p_cue = price_cue.strip()
 
-        queries = []
+        passes = []
+
         if norm_gender == 'female':
-            # Base query (e.g. "women party dress summer")
-            base = f"women {occ_term} dress {season_term}".strip()
-            queries.append(" ".join(base.split()))
+            # PASS 1: Base gender + occasion + season (with price cue)
+            p1 = [
+                f"women {occ_term} dress {season_term} {p_cue}".strip(),
+                f"women {occ_term} dress {p_cue}".strip()
+            ]
+            passes.append([q for q in p1 if q])
 
-            # Color queries (multi-color search matching skin tone palette)
-            for col in (skin_palette or DEFAULT_SKIN_PALETTE)[:6]:
-                q = f"women {occ_term} dress {col} {season_term}".strip()
-                queries.append(" ".join(q.split()))
+            # PASS 2: Skin-tone colors (individual queries matching skin tone palette)
+            p2 = [f"women {col} {occ_term} dress {season_term} {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[:4]]
+            passes.append([q for q in p2 if q])
 
-            # Style variations (midi, maxi, wrap, fit and flare, a line, bodycon, cocktail)
-            styles = ['midi dress', 'maxi dress', 'wrap dress', 'a line dress', 'fit and flare dress', 'cocktail dress']
-            for st in styles[:4]:
-                q = f"women {st} {occ_term} {season_term}".strip()
-                queries.append(" ".join(q.split()))
+            # PASS 3: Dress styles (midi, maxi, wrap, fit and flare, a line, bodycon)
+            styles = ['midi dress', 'maxi dress', 'wrap dress', 'a line dress', 'fit and flare dress', 'bodycon dress']
+            p3 = [f"women {st} {occ_term} {season_term} {p_cue}".strip() for st in styles[:4]]
+            passes.append([q for q in p3 if q])
 
-        else: # male
-            base = f"men {occ_term} casual shirt {season_term}".strip()
-            queries.append(" ".join(base.split()))
+            # PASS 4: Occasion synonyms
+            occ_syns = {
+                'party': ['cocktail dress', 'evening dress', 'party wear dress', 'occasion dress'],
+                'casual': ['day dress', 'summer dress', 'everyday dress', 'casual midi dress'],
+                'date': ['date night dress', 'cocktail dress', 'evening dress'],
+                'work': ['formal dress', 'office dress', 'work dress', 'shirt dress'],
+                'formal': ['formal gown', 'sheath dress', 'evening gown', 'formal dress'],
+            }.get((occasion or '').lower(), ['party dress', 'cocktail dress'])
+            p4 = [f"women {syn} {season_term} {p_cue}".strip() for syn in occ_syns[:3]]
+            passes.append([q for q in p4 if q])
 
-            for col in (skin_palette or DEFAULT_SKIN_PALETTE)[:4]:
-                q = f"men {occ_term} shirt {col} {season_term}".strip()
-                queries.append(" ".join(q.split()))
+            # PASS 5: Season synonyms
+            seas_syns = {
+                'spring': ['spring dress', 'floral dress', 'pastel dress', 'lightweight dress'],
+                'summer': ['summer dress', 'cotton dress', 'linen dress', 'sundress'],
+                'autumn': ['autumn dress', 'fall dress', 'midi dress', 'long sleeve dress'],
+                'winter': ['winter dress', 'knit dress', 'sweater dress', 'velvet dress'],
+            }.get(season_term, ['summer dress', 'floral dress'])
+            p5 = [f"women {syn} {occ_term} {p_cue}".strip() for syn in seas_syns[:3]]
+            passes.append([q for q in p5 if q])
 
-            styles = ['casual shirt', 'polo t-shirt', 'formal shirt', 'blazer']
-            for st in styles[:3]:
-                q = f"men {st} {occ_term} {season_term}".strip()
-                queries.append(" ".join(q.split()))
+            # PASS 6: Additional colors from skin-tone palette
+            p6 = [f"women {col} dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
+            passes.append([q for q in p6 if q])
 
-        # Deduplicate while preserving order
+            # PASS 7: Retailer-specific queries
+            if retailer:
+                p7 = [f"{retailer} women {occ_term} dress {p_cue}".strip(), f"{retailer} women dress {p_cue}".strip()]
+            else:
+                p7 = [f"women {occ_term} dress {ret} {p_cue}".strip() for ret in ['myntra', 'amazon', 'ajio', 'tatacliq', 'savana', 'newme']]
+            passes.append([q for q in p7 if q])
+
+            # PASS 8: Alternative combinations
+            p8 = [
+                f"women {season_term} {occ_term} gown {p_cue}".strip(),
+                f"women ethnic anarkali dress {p_cue}".strip(),
+                f"women kurti dress {p_cue}".strip()
+            ]
+            passes.append([q for q in p8 if q])
+
+            # PASS 9: Broader but valid dress queries
+            p9 = [
+                f"women dress online india {p_cue}".strip(),
+                f"women stylish dress {p_cue}".strip()
+            ]
+            passes.append([q for q in p9 if q])
+
+        else: # Male
+            p1 = [f"men {occ_term} casual shirt {season_term} {p_cue}".strip()]
+            passes.append(p1)
+
+            p2 = [f"men {col} {occ_term} shirt {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[:4]]
+            passes.append(p2)
+
+            p3 = [f"men {st} {occ_term} {p_cue}".strip() for st in ['casual shirt', 'polo t-shirt', 'formal shirt', 'blazer']]
+            passes.append(p3)
+
+            p4 = [f"men {occ_term} clothing {season_term} {p_cue}".strip()]
+            passes.append(p4)
+
+            p5 = [f"men {season_term} shirt {p_cue}".strip()]
+            passes.append(p5)
+
+            p6 = [f"men {col} casual shirt {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
+            passes.append(p6)
+
+            if retailer:
+                p7 = [f"{retailer} men {occ_term} shirt {p_cue}".strip()]
+            else:
+                p7 = [f"men {occ_term} shirt {ret} {p_cue}".strip() for ret in ['myntra', 'amazon', 'ajio']]
+            passes.append(p7)
+
+            p8 = [f"men {occ_term} menswear {p_cue}".strip()]
+            passes.append(p8)
+
+            p9 = [f"men casual clothing india {p_cue}".strip()]
+            passes.append(p9)
+
+        return passes
+
+    def generate_multi_queries(
+        self,
+        norm_gender: str,
+        occasion: str,
+        season: str,
+        skin_palette: List[str],
+        target_category: str = 'dress',
+        price_cue: str = ""
+    ) -> List[str]:
+        """
+        Builds a multi-query search set flattening passes 1 to 4 for immediate parallel execution.
+        """
+        passes = self.generate_search_passes(norm_gender, occasion, season, skin_palette, price_cue, target_category)
+        queries = []
+        for p in passes[:4]:
+            queries.extend(p)
+
         seen = set()
         deduped = []
         for q in queries:
@@ -1067,7 +1276,8 @@ class SerpApiShoppingService:
         self,
         norm_gender: str,
         occasion: str,
-        season: str
+        season: str,
+        price_cue: str = ""
     ) -> List[str]:
         """Progressive broadening queries (Section 15, Levels 3 & 4) preserving gender and category."""
         occ_term = OCCASION_SEARCH_MAP.get((occasion or '').lower(), (occasion or '').lower())
@@ -1076,18 +1286,19 @@ class SerpApiShoppingService:
         season_term = (season or '').lower()
         if season_term in ('all', ''):
             season_term = ''
+        p_cue = price_cue.strip()
 
         broadening = []
         if norm_gender == 'female':
             if occ_term and season_term:
-                broadening.append(f"women {occ_term} dress {season_term}".strip())
+                broadening.append(f"women {occ_term} dress {season_term} {p_cue}".strip())
             if season_term:
-                broadening.append(f"women dress {season_term}".strip())
-            broadening.append("women dress online india")
+                broadening.append(f"women dress {season_term} {p_cue}".strip())
+            broadening.append(f"women dress online india {p_cue}".strip())
         else:
             if occ_term and season_term:
-                broadening.append(f"men {occ_term} clothing {season_term}".strip())
-            broadening.append("men casual clothing")
+                broadening.append(f"men {occ_term} clothing {season_term} {p_cue}".strip())
+            broadening.append(f"men casual clothing {p_cue}".strip())
         
         seen = set()
         deduped = []
@@ -1210,12 +1421,19 @@ class SerpApiShoppingService:
         seen_urls: set,
         seen_title_keys: set,
         retailer_candidate_counts: dict,
-        stats: dict
+        stats: dict,
+        seen_product_ids: Optional[set] = None,
+        seen_images: Optional[set] = None
     ) -> List[dict]:
         """
         Filters and scores raw SerpApi items under strict gender, category, image, URL,
         and price range constraints with structured logging.
         """
+        if seen_product_ids is None:
+            seen_product_ids = set()
+        if seen_images is None:
+            seen_images = set()
+
         accepted_candidates = []
 
         for it in raw_items:
@@ -1315,23 +1533,47 @@ class SerpApiShoppingService:
             if not ret_ok2:
                 continue
 
-            # Deduplication: direct URL
-            if direct_url in seen_urls:
+            # Deduplication: direct canonical URL
+            canon_url = self.canonicalize_url(direct_url)
+            if canon_url in seen_urls:
                 stats['duplicates_removed'] += 1
                 continue
-            seen_urls.add(direct_url)
+            seen_urls.add(canon_url)
 
-            # Deduplication: Title key across sizes/SKUs
-            clean_title_words = [
-                w for w in re.sub(r'[^a-zA-Z0-9\s]', '', title.lower()).split()
-                if w not in ['women', 'womens', 'ladies', 'dress', 'color', 'size', 'party', 'summer', 'fit', 'flare', 'printed', 'solid', 'men', 'mens', 'shirt', 'cotton']
-            ]
-            title_key = " ".join(clean_title_words[:3])
-            if title_key and title_key in seen_title_keys:
+            # Deduplication: Authentic Image URL (prevent duplicate images on cards)
+            img_to_check = thumbnail or it.get('image') or it.get('image_url')
+            if img_to_check and seen_images is not None:
+                tbn_match = re.search(r'q=tbn:([^&]+)', img_to_check)
+                img_key = tbn_match.group(1) if tbn_match else img_to_check.split('?')[0].strip()
+                if img_key in seen_images:
+                    stats['duplicates_removed'] += 1
+                    continue
+                seen_images.add(img_key)
+
+            # Deduplication: Product ID
+            prod_id = str(it.get('product_id') or it.get('id') or '').strip()
+            if prod_id and prod_id in seen_product_ids:
                 stats['duplicates_removed'] += 1
                 continue
-            if title_key:
-                seen_title_keys.add(title_key)
+            if prod_id:
+                seen_product_ids.add(prod_id)
+
+            # Deduplication: Title key across sizes/SKUs (without discarding distinct dresses from same brand)
+            norm_title = re.sub(r'[^a-z0-9]', ' ', title.lower())
+            noise_tokens = {
+                'women', 'womens', 'ladies', 'woman', 'girl', 'girls', 'female',
+                'dress', 'dresses', 'printed', 'solid', 'color', 'size',
+                'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', 'small', 'medium', 'large',
+                'cotton', 'polyester', 'western', 'casual', 'party', 'for', 'and', 'with', 'the',
+                'men', 'mens', 'shirt', 'shirts', 'male', 'boy', 'boys'
+            }
+            meaningful_tokens = [w for w in norm_title.split() if w not in noise_tokens]
+            title_slug = f"{final_retailer.lower()}_" + "_".join(meaningful_tokens[:4])
+            if len(meaningful_tokens) >= 2:
+                if title_slug in seen_title_keys:
+                    stats['duplicates_removed'] += 1
+                    continue
+                seen_title_keys.add(title_slug)
 
             # Availability
             availability = self.parse_availability(it.get('details_and_offers', []), it.get('delivery'))
@@ -1369,7 +1611,7 @@ class SerpApiShoppingService:
             candidate_item = {
                 'it': it,
                 'title': title,
-                'title_key': title_key,
+                'title_key': title_slug,
                 'thumbnail': thumbnail,
                 'retailer_name': final_retailer,
                 'brand': it.get('brand') or final_retailer,
@@ -1461,9 +1703,17 @@ class SerpApiShoppingService:
             print(f"[ShoppingService] Returning {len(cached)} live products from cache ({cache_key})")
             return cached
 
-        # Generate Multi-Query Set (Sections 5 & 6)
-        queries = self.generate_multi_queries(norm_gender, occasion, season, palette, target_category)
-        print(f"[ShoppingService] Launching {len(queries)} parallel live queries for {norm_gender} / {occasion} / {season}")
+        # Generate Controlled Multi-Pass Search Sets (Sections 3, 5, 6, 7, 8, 17)
+        price_cue = get_price_query_cue(price_range, min_p, max_p)
+        search_passes = self.generate_search_passes(
+            norm_gender=norm_gender,
+            occasion=occasion,
+            season=season,
+            palette=palette,
+            price_cue=price_cue,
+            target_category=target_category,
+            retailer=req_ret
+        )
 
         stats = {
             'candidates': 0,
@@ -1479,61 +1729,35 @@ class SerpApiShoppingService:
 
         seen_urls = set()
         seen_title_keys = set()
+        seen_product_ids = set()
+        seen_images = set()
         retailer_candidate_counts = {}
         all_candidates = []
         executed_queries_count = 0
+        seen_queries = set()
 
         # Fast circuit breaker check: If SerpApi quota is currently depleted, skip network overhead
         if not self.is_quota_exhausted():
-            # Stage 1: High-yield top 4 queries (base query + top skin-tone palette & style variations)
-            stage1_queries = queries[:4]
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 5): q for q in stage1_queries}
-                for future in as_completed(future_to_query):
-                    executed_queries_count += 1
-                    q = future_to_query[future]
-                    try:
-                        _, raw_results = future.result()
-                    except Exception as e:
-                        print(f"[ShoppingService] Query failed '{q}': {e}")
-                        raw_results = []
+            for pass_idx, pass_queries in enumerate(search_passes, 1):
+                if len(all_candidates) >= target_limit:
+                    break
 
-                    candidates_from_query = self._process_candidate_items(
-                        raw_items=raw_results,
-                        norm_gender=norm_gender,
-                        target_category=target_category,
-                        req_ret=req_ret,
-                        min_p=min_p,
-                        max_p=max_p,
-                        price_label=price_label,
-                        occasion=occasion,
-                        season=season,
-                        palette=palette,
-                        seen_urls=seen_urls,
-                        seen_title_keys=seen_title_keys,
-                        retailer_candidate_counts=retailer_candidate_counts,
-                        stats=stats
-                    )
-                    all_candidates.extend(candidates_from_query)
+                unseen_queries = [q for q in pass_queries if q and q not in seen_queries]
+                if not unseen_queries:
+                    continue
 
-                    log_shopping_query(
-                        query=q,
-                        returned=len(raw_results),
-                        accepted=len(candidates_from_query),
-                        rejected=len(raw_results) - len(candidates_from_query)
-                    )
+                for q in unseen_queries:
+                    seen_queries.add(q)
 
-            # Stage 2: Backfill queries only if candidate pool is insufficient and circuit breaker not tripped
-            if len(all_candidates) < int(target_limit * 1.25) and not self.is_quota_exhausted() and len(queries) > 4:
-                stage2_queries = queries[4:]
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 5): q for q in stage2_queries}
+                with ThreadPoolExecutor(max_workers=min(4, len(unseen_queries))) as executor:
+                    future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 5): q for q in unseen_queries}
                     for future in as_completed(future_to_query):
                         executed_queries_count += 1
                         q = future_to_query[future]
                         try:
                             _, raw_results = future.result()
                         except Exception as e:
+                            print(f"[ShoppingService] Query failed '{q}': {e}")
                             raw_results = []
 
                         candidates_from_query = self._process_candidate_items(
@@ -1550,67 +1774,34 @@ class SerpApiShoppingService:
                             seen_urls=seen_urls,
                             seen_title_keys=seen_title_keys,
                             retailer_candidate_counts=retailer_candidate_counts,
-                            stats=stats
+                            stats=stats,
+                            seen_product_ids=seen_product_ids,
+                            seen_images=seen_images
                         )
                         all_candidates.extend(candidates_from_query)
+
                         log_shopping_query(
                             query=q,
                             returned=len(raw_results),
                             accepted=len(candidates_from_query),
                             rejected=len(raw_results) - len(candidates_from_query)
                         )
+
                         if len(all_candidates) >= int(target_limit * 1.5):
                             break
 
-            # Progressive Broadening if candidates < target_limit (Section 15 & 19)
-            if len(all_candidates) < target_limit and not self.is_quota_exhausted():
-                broadening_queries = self.generate_broadening_queries(norm_gender, occasion, season)
-                remaining_broad = [bq for bq in broadening_queries if bq not in queries]
-                if remaining_broad:
-                    print(f"[ShoppingService] Progressive broadening: launching {len(remaining_broad)} fallback queries")
-                    with ThreadPoolExecutor(max_workers=3) as executor:
-                        broad_futures = {executor.submit(self._execute_single_serpapi_query, bq, 5): bq for bq in remaining_broad}
-                        for future in as_completed(broad_futures):
-                            executed_queries_count += 1
-                            bq = broad_futures[future]
-                            try:
-                                _, raw_results = future.result()
-                            except Exception as e:
-                                raw_results = []
-
-                            broad_candidates = self._process_candidate_items(
-                                raw_items=raw_results,
-                                norm_gender=norm_gender,
-                                target_category=target_category,
-                                req_ret=req_ret,
-                                min_p=min_p,
-                                max_p=max_p,
-                                price_label=price_label,
-                                occasion=occasion,
-                                season=season,
-                                palette=palette,
-                                seen_urls=seen_urls,
-                                seen_title_keys=seen_title_keys,
-                                retailer_candidate_counts=retailer_candidate_counts,
-                                stats=stats
-                            )
-                            all_candidates.extend(broad_candidates)
-                            log_shopping_query(
-                                query=bq,
-                                returned=len(raw_results),
-                                accepted=len(broad_candidates),
-                                rejected=len(raw_results) - len(broad_candidates)
-                            )
+                if len(all_candidates) >= target_limit:
+                    break
         else:
             print("[ShoppingService] SerpApi quota circuit breaker active. Bypassing external calls and using authentic live SerpApi database catalog directly.")
 
-        # Resilient live fallback: if live queries returned 0 candidates (e.g. rate limit / HTTP 429 quota exhaustion or temporary network dropout),
-        # use the authentic live SerpApi products previously fetched and persisted in the database.
-        # Strict validation (gender, category, price range, retailer) is STILL enforced identically!
-        if len(all_candidates) == 0:
-            print("[ShoppingService] Live queries returned 0 results. Checking persisted live SerpApi items under identical strict filters...")
+        # Resilient live catalog: if candidates are below target_limit (e.g. quota exhausted or sparse live results),
+        # supplement from authentic live SerpApi products previously fetched and persisted in the database.
+        # Strict validation (gender, category, price range, retailer, image, direct URL, dedup) is STILL enforced identically!
+        if len(all_candidates) < target_limit:
+            print(f"[ShoppingService] Live queries yielded {len(all_candidates)}/{target_limit}. Supplementing from persisted live SerpApi items under identical strict filters...")
             from models.outfit import Outfit
-            db_query = Outfit.query.filter_by(source='serpapi')
+            db_query = Outfit.query.filter(Outfit.source.like('serpapi%'), Outfit.in_stock == True)
             if req_ret:
                 db_query = db_query.filter(Outfit.store.ilike(f"%{req_ret}%"))
             live_db_outfits = db_query.all()
@@ -1646,7 +1837,9 @@ class SerpApiShoppingService:
                     seen_urls=seen_urls,
                     seen_title_keys=seen_title_keys,
                     retailer_candidate_counts=retailer_candidate_counts,
-                    stats=stats
+                    stats=stats,
+                    seen_product_ids=seen_product_ids,
+                    seen_images=seen_images
                 )
                 all_candidates.extend(db_candidates)
 
@@ -1746,6 +1939,24 @@ class SerpApiShoppingService:
             final_products=stats['final_products']
         )
 
+        # Structured Log: Shopping Inventory Diagnostics (Section 23)
+        log_shopping_inventory(
+            gender=norm_gender,
+            skin_tone=skin_tone or 'medium',
+            occasion=occasion,
+            season=season,
+            price_range=price_label,
+            requested=target_limit,
+            candidates=stats['candidates'],
+            gender_valid=stats['gender_accepted'],
+            dress_valid=stats['category_accepted'],
+            image_valid=stats['image_accepted'],
+            price_valid=stats['price_accepted'],
+            direct_url_valid=stats['url_accepted'],
+            after_dedup=len(all_candidates),
+            final_result=len(live_products)
+        )
+
         if live_products:
             _shopping_cache.set(cache_key, live_products)
 
@@ -1803,7 +2014,7 @@ class SerpApiShoppingService:
         if not results:
             print("[ShoppingService] Similar query returned 0 results. Checking persisted live SerpApi items under strict validation...")
             from models.outfit import Outfit
-            db_query = Outfit.query.filter_by(source='serpapi')
+            db_query = Outfit.query.filter(Outfit.source.like('serpapi%'), Outfit.in_stock == True)
             if req_ret:
                 db_query = db_query.filter(Outfit.store.ilike(f"%{req_ret}%"))
             live_db_outfits = db_query.all()
@@ -1828,7 +2039,13 @@ class SerpApiShoppingService:
 
         similar_items = []
         seen_sim_urls = set()
+        seen_sim_images = set()
         seen_sim_retailers = {}
+
+        main_img = (main_product.get('image_url') or main_product.get('image') or '').strip()
+        if main_img:
+            tbn_m = re.search(r'q=tbn:([^&]+)', main_img)
+            seen_sim_images.add(tbn_m.group(1) if tbn_m else main_img.split('?')[0].strip())
 
         for it in results:
             title = (it.get('title') or '').strip()
@@ -1844,6 +2061,13 @@ class SerpApiShoppingService:
                 continue
             if pre_retailer.lower() == 'aurafit official':
                 continue
+
+            # Strict image deduplication against main item and previous similar items
+            tbn_m = re.search(r'q=tbn:([^&]+)', thumbnail)
+            sim_img_key = tbn_m.group(1) if tbn_m else thumbnail.split('?')[0].strip()
+            if sim_img_key in seen_sim_images:
+                continue
+            seen_sim_images.add(sim_img_key)
 
             # 1. Retailer filter
             ret_ok, _ = validate_retailer(pre_retailer, req_ret)
@@ -1903,9 +2127,10 @@ class SerpApiShoppingService:
 
             if not direct_url or not self.is_valid_direct_url(direct_url):
                 continue
-            if direct_url in seen_sim_urls:
+            canon_sim_url = self.canonicalize_url(direct_url)
+            if canon_sim_url in seen_sim_urls:
                 continue
-            seen_sim_urls.add(direct_url)
+            seen_sim_urls.add(canon_sim_url)
 
             final_retailer = self.clean_retailer_name(resolved_source)
             if final_retailer.lower() == 'aurafit official':
