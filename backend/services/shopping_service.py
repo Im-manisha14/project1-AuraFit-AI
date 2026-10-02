@@ -749,6 +749,22 @@ class SerpApiShoppingService:
     SerpApi Google Shopping + Google Immersive Product Stores Shopping Service.
     Acts as the SINGLE SOURCE OF TRUTH for live shopping recommendations.
     """
+    _quota_exhausted_until: Optional[datetime] = None
+
+    @classmethod
+    def mark_quota_exhausted(cls, seconds: int = 300):
+        """Activates circuit breaker when SerpApi quota or rate limit is reached."""
+        cls._quota_exhausted_until = datetime.utcnow() + timedelta(seconds=seconds)
+        print(f"[ShoppingService] SerpApi quota exhausted / rate limited. Circuit breaker active for {seconds}s.")
+
+    @classmethod
+    def is_quota_exhausted(cls) -> bool:
+        """Returns True if SerpApi searches should be bypassed due to quota exhaustion."""
+        if cls._quota_exhausted_until:
+            if datetime.utcnow() < cls._quota_exhausted_until:
+                return True
+            cls._quota_exhausted_until = None
+        return False
 
     def __init__(self):
         self.api_key = os.environ.get('SERPAPI_KEY') or os.environ.get('SERP_API_KEY')
@@ -1082,8 +1098,11 @@ class SerpApiShoppingService:
                 deduped.append(cleaned)
         return deduped
 
-    def _execute_single_serpapi_query(self, query: str, timeout: int = 10) -> Tuple[str, List[dict]]:
-        """Executes a single SerpApi Google Shopping query with timeout handling."""
+    def _execute_single_serpapi_query(self, query: str, timeout: int = 5) -> Tuple[str, List[dict]]:
+        """Executes a single SerpApi Google Shopping query with timeout and circuit breaker handling."""
+        if self.is_quota_exhausted():
+            return query, []
+
         params = {
             'engine': 'google_shopping',
             'q': query,
@@ -1094,8 +1113,16 @@ class SerpApiShoppingService:
         }
         try:
             resp = requests.get(self.base_url, params=params, timeout=timeout)
-            if resp.ok:
+            if resp.status_code == 429:
+                print(f"[ShoppingService] HTTP 429 (quota exhausted) for query '{query}'. Triggering circuit breaker.")
+                self.mark_quota_exhausted(300)
+                return query, []
+            elif resp.ok:
                 data = resp.json()
+                if data.get('error') and any(err_term in str(data.get('error')).lower() for err_term in ['run out of searches', 'searches depleted', 'quota reached', 'rate limit']):
+                    print(f"[ShoppingService] Quota error in SerpApi response: {data.get('error')}. Triggering circuit breaker.")
+                    self.mark_quota_exhausted(300)
+                    return query, []
                 results = data.get('shopping_results', []) or []
                 return query, results
             else:
@@ -1456,61 +1483,60 @@ class SerpApiShoppingService:
         all_candidates = []
         executed_queries_count = 0
 
-        # Run primary multi-queries concurrently
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 10): q for q in queries}
-            for future in as_completed(future_to_query):
-                executed_queries_count += 1
-                q = future_to_query[future]
-                try:
-                    _, raw_results = future.result()
-                except Exception as e:
-                    print(f"[ShoppingService] Query failed '{q}': {e}")
-                    raw_results = []
+        # Fast circuit breaker check: If SerpApi quota is currently depleted, skip network overhead
+        if not self.is_quota_exhausted():
+            # Stage 1: High-yield top 4 queries (base query + top skin-tone palette & style variations)
+            stage1_queries = queries[:4]
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 5): q for q in stage1_queries}
+                for future in as_completed(future_to_query):
+                    executed_queries_count += 1
+                    q = future_to_query[future]
+                    try:
+                        _, raw_results = future.result()
+                    except Exception as e:
+                        print(f"[ShoppingService] Query failed '{q}': {e}")
+                        raw_results = []
 
-                candidates_from_query = self._process_candidate_items(
-                    raw_items=raw_results,
-                    norm_gender=norm_gender,
-                    target_category=target_category,
-                    req_ret=req_ret,
-                    min_p=min_p,
-                    max_p=max_p,
-                    price_label=price_label,
-                    occasion=occasion,
-                    season=season,
-                    palette=palette,
-                    seen_urls=seen_urls,
-                    seen_title_keys=seen_title_keys,
-                    retailer_candidate_counts=retailer_candidate_counts,
-                    stats=stats
-                )
-                all_candidates.extend(candidates_from_query)
+                    candidates_from_query = self._process_candidate_items(
+                        raw_items=raw_results,
+                        norm_gender=norm_gender,
+                        target_category=target_category,
+                        req_ret=req_ret,
+                        min_p=min_p,
+                        max_p=max_p,
+                        price_label=price_label,
+                        occasion=occasion,
+                        season=season,
+                        palette=palette,
+                        seen_urls=seen_urls,
+                        seen_title_keys=seen_title_keys,
+                        retailer_candidate_counts=retailer_candidate_counts,
+                        stats=stats
+                    )
+                    all_candidates.extend(candidates_from_query)
 
-                # Structured Log: Shopping Query (Section 27)
-                log_shopping_query(
-                    query=q,
-                    returned=len(raw_results),
-                    accepted=len(candidates_from_query),
-                    rejected=len(raw_results) - len(candidates_from_query)
-                )
+                    log_shopping_query(
+                        query=q,
+                        returned=len(raw_results),
+                        accepted=len(candidates_from_query),
+                        rejected=len(raw_results) - len(candidates_from_query)
+                    )
 
-        # Progressive Broadening if candidates < target_limit (Section 15)
-        if len(all_candidates) < target_limit:
-            broadening_queries = self.generate_broadening_queries(norm_gender, occasion, season)
-            remaining_broad = [bq for bq in broadening_queries if bq not in queries]
-            if remaining_broad:
-                print(f"[ShoppingService] Progressive broadening: launching {len(remaining_broad)} fallback queries")
-                with ThreadPoolExecutor(max_workers=3) as executor:
-                    broad_futures = {executor.submit(self._execute_single_serpapi_query, bq, 10): bq for bq in remaining_broad}
-                    for future in as_completed(broad_futures):
+            # Stage 2: Backfill queries only if candidate pool is insufficient and circuit breaker not tripped
+            if len(all_candidates) < int(target_limit * 1.25) and not self.is_quota_exhausted() and len(queries) > 4:
+                stage2_queries = queries[4:]
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    future_to_query = {executor.submit(self._execute_single_serpapi_query, q, 5): q for q in stage2_queries}
+                    for future in as_completed(future_to_query):
                         executed_queries_count += 1
-                        bq = broad_futures[future]
+                        q = future_to_query[future]
                         try:
                             _, raw_results = future.result()
                         except Exception as e:
                             raw_results = []
 
-                        broad_candidates = self._process_candidate_items(
+                        candidates_from_query = self._process_candidate_items(
                             raw_items=raw_results,
                             norm_gender=norm_gender,
                             target_category=target_category,
@@ -1526,13 +1552,57 @@ class SerpApiShoppingService:
                             retailer_candidate_counts=retailer_candidate_counts,
                             stats=stats
                         )
-                        all_candidates.extend(broad_candidates)
+                        all_candidates.extend(candidates_from_query)
                         log_shopping_query(
-                            query=bq,
+                            query=q,
                             returned=len(raw_results),
-                            accepted=len(broad_candidates),
-                            rejected=len(raw_results) - len(broad_candidates)
+                            accepted=len(candidates_from_query),
+                            rejected=len(raw_results) - len(candidates_from_query)
                         )
+                        if len(all_candidates) >= int(target_limit * 1.5):
+                            break
+
+            # Progressive Broadening if candidates < target_limit (Section 15 & 19)
+            if len(all_candidates) < target_limit and not self.is_quota_exhausted():
+                broadening_queries = self.generate_broadening_queries(norm_gender, occasion, season)
+                remaining_broad = [bq for bq in broadening_queries if bq not in queries]
+                if remaining_broad:
+                    print(f"[ShoppingService] Progressive broadening: launching {len(remaining_broad)} fallback queries")
+                    with ThreadPoolExecutor(max_workers=3) as executor:
+                        broad_futures = {executor.submit(self._execute_single_serpapi_query, bq, 5): bq for bq in remaining_broad}
+                        for future in as_completed(broad_futures):
+                            executed_queries_count += 1
+                            bq = broad_futures[future]
+                            try:
+                                _, raw_results = future.result()
+                            except Exception as e:
+                                raw_results = []
+
+                            broad_candidates = self._process_candidate_items(
+                                raw_items=raw_results,
+                                norm_gender=norm_gender,
+                                target_category=target_category,
+                                req_ret=req_ret,
+                                min_p=min_p,
+                                max_p=max_p,
+                                price_label=price_label,
+                                occasion=occasion,
+                                season=season,
+                                palette=palette,
+                                seen_urls=seen_urls,
+                                seen_title_keys=seen_title_keys,
+                                retailer_candidate_counts=retailer_candidate_counts,
+                                stats=stats
+                            )
+                            all_candidates.extend(broad_candidates)
+                            log_shopping_query(
+                                query=bq,
+                                returned=len(raw_results),
+                                accepted=len(broad_candidates),
+                                rejected=len(raw_results) - len(broad_candidates)
+                            )
+        else:
+            print("[ShoppingService] SerpApi quota circuit breaker active. Bypassing external calls and using authentic live SerpApi database catalog directly.")
 
         # Resilient live fallback: if live queries returned 0 candidates (e.g. rate limit / HTTP 429 quota exhaustion or temporary network dropout),
         # use the authentic live SerpApi products previously fetched and persisted in the database.
@@ -1642,7 +1712,8 @@ class SerpApiShoppingService:
                 occasion=OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
                 season=season if season != 'all' else 'all',
                 colors=c['colors'],
-                additional_images=extra_imgs
+                additional_images=extra_imgs,
+                commit=False
             )
 
             if outfit_record:
@@ -1652,6 +1723,13 @@ class SerpApiShoppingService:
                 p_dict['shopping_links'] = { retailer_name.lower().replace(' ', ''): direct_url }
                 p_dict['match_score'] = round(c['ranking_score'] / 100.0, 2)
                 live_products.append(p_dict)
+
+        # Execute single batch commit for SQLite performance
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[ShoppingService] Batch DB commit error: {e}")
 
         # Structured Log: Shopping Summary (Section 27)
         stats['final_products'] = len(live_products)
@@ -1716,8 +1794,11 @@ class SerpApiShoppingService:
         else:
             similar_query = f"men {target_category} {color} {occasion}".strip()
 
-        print(f"[ShoppingService] Similar live query: '{similar_query}'")
-        _, results = self._execute_single_serpapi_query(similar_query, timeout=10)
+        if self.is_quota_exhausted():
+            results = []
+        else:
+            print(f"[ShoppingService] Similar live query: '{similar_query}'")
+            _, results = self._execute_single_serpapi_query(similar_query, timeout=4)
 
         if not results:
             print("[ShoppingService] Similar query returned 0 results. Checking persisted live SerpApi items under strict validation...")
@@ -1860,7 +1941,8 @@ class SerpApiShoppingService:
                 occasion=OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
                 season='all',
                 colors=[color],
-                additional_images=it.get('thumbnails') or []
+                additional_images=it.get('thumbnails') or [],
+                commit=False
             )
 
             if outfit_record:
@@ -1872,6 +1954,13 @@ class SerpApiShoppingService:
 
             if len(similar_items) >= limit:
                 break
+
+        # Batch commit similar items
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[ShoppingService] Similar items batch DB commit error: {e}")
 
         if similar_items:
             _shopping_cache.set(cache_key, similar_items)
@@ -1898,7 +1987,8 @@ class SerpApiShoppingService:
         category: str = 'dress',
         additional_images: Optional[List[str]] = None,
         original_price: Optional[float] = None,
-        discount: Optional[str] = None
+        discount: Optional[str] = None,
+        commit: bool = True
     ) -> Optional[Outfit]:
         """Upsert a live product into the Outfit table so detail routes can load it with 100% identity."""
         try:
@@ -1921,7 +2011,8 @@ class SerpApiShoppingService:
                 existing.in_stock = True
                 existing.purchasable = True
                 existing.source = 'serpapi'
-                db.session.commit()
+                if commit:
+                    db.session.commit()
                 return existing
 
             new_outfit = Outfit(
@@ -1950,7 +2041,8 @@ class SerpApiShoppingService:
                 body_type_compatibility=['all']
             )
             db.session.add(new_outfit)
-            db.session.commit()
+            if commit:
+                db.session.commit()
             return new_outfit
         except Exception as e:
             db.session.rollback()

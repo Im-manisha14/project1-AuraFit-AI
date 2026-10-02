@@ -186,8 +186,13 @@ class RecommendationEngine:
                 scored.sort(key=lambda x: x['overall_score'], reverse=True)
                 top = scored[:limit]
 
-                # Fetch similar live recommendations from SerpApi with matching price & retailer filters
-                if top:
+                # Instant similar live recommendations:
+                # Reuse validated scored candidates from the candidate pool for instantaneous 0ms response
+                if len(scored) > limit:
+                    self.last_similar_recommendations = [s['outfit'] for s in scored[limit:limit+4]]
+                elif len(scored) > 1:
+                    self.last_similar_recommendations = [s['outfit'] for s in scored[1:min(5, len(scored))]]
+                elif top:
                     self.last_similar_recommendations = shopping_service.fetch_similar_live_products(
                         top[0]['outfit'], profile, limit=4,
                         min_price=min_price, max_price=max_price, price_range=price_range, retailer=retailer
