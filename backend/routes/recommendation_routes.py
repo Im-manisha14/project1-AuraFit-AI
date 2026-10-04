@@ -154,7 +154,20 @@ def get_collections():
         def attach_links(outfits, max_items=limit):
             result = []
             seen_col_imgs = set()
+            seen_col_urls = set()
+            seen_col_ids = set()
             for o in outfits:
+                # 1. Product & category validation (Section 18 & 19)
+                prod_dict = {'title': o.name, 'description': o.description or '', 'category': o.category or ''}
+                if gender == 'female':
+                    is_dress, _, _ = ProductValidator.is_actual_dress(prod_dict)
+                    if not is_dress:
+                        continue
+                is_compat, _, _ = ProductValidator.is_gender_compatible(prod_dict, gender)
+                if not is_compat:
+                    continue
+
+                # 2. Image validation & deduplication
                 img = (o.image_url or '').strip()
                 if not img:
                     continue
@@ -162,13 +175,27 @@ def get_collections():
                 img_k = tbn_m.group(1) if tbn_m else img.split('?')[0].strip()
                 if img_k in seen_col_imgs:
                     continue
+
+                # 3. Canonical URL & ID deduplication
+                url = (o.product_url or '').strip()
+                canon_u = ProductValidator.canonicalize_url(url) if url else ''
+                if canon_u and canon_u in seen_col_urls:
+                    continue
+
+                cid = f"{o.store or ''}:{o.external_id or canon_u or o.name}"
+                if cid in seen_col_ids:
+                    continue
+
                 seen_col_imgs.add(img_k)
+                if canon_u:
+                    seen_col_urls.add(canon_u)
+                seen_col_ids.add(cid)
 
                 d = o.to_dict()
                 d['shopping_links'] = engine._generate_shopping_links(o, gender)
                 if o.product_url:
                     d['exact_product_link_available'] = True
-                    d['shopping_url'] = o.product_url
+                    d['shopping_url'] = canon_u or o.product_url
                 else:
                     d['shopping_url'] = None
                 result.append(d)

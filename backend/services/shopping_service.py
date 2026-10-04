@@ -238,6 +238,51 @@ class ProductValidator:
         words = [w for w in t.split() if w not in noise]
         return " ".join(words)
 
+    @staticmethod
+    def canonicalize_url(raw_url: Optional[str]) -> str:
+        """
+        Strips tracking query parameters and canonicalizes retailer product URLs for deduplication.
+        """
+        if not raw_url or not isinstance(raw_url, str):
+            return ""
+        cand = raw_url.strip()
+        try:
+            parsed = urllib.parse.urlparse(cand)
+            tracking_params = {
+                'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+                'srsltid', 'gclid', 'fbclid', 'source', 'ref_', 'psc', 'tag',
+                'pf_rd_r', 'pf_rd_p', 'pf_rd_m', 'pf_rd_s', 'pf_rd_t', 'pf_rd_i',
+                'pd_rd_r', 'pd_rd_w', 'pd_rd_wg', 'linkcode', 'camp', 'creative', 'ref',
+                'spm', '_x_tr_sl', '_x_tr_tl', '_x_tr_hl', 'size', 'sz', 'color', 'colour'
+            }
+            qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=False)
+            cleaned_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params and not k.lower().startswith('utm_')}
+            new_query = urllib.parse.urlencode(cleaned_qs, doseq=True)
+            clean_path = parsed.path
+            
+            # Amazon ASIN canonicalization
+            asin_match = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', clean_path, re.IGNORECASE)
+            if 'amazon' in parsed.netloc.lower() and asin_match:
+                asin = asin_match.group(1).upper()
+                return f"https://www.amazon.in/dp/{asin}"
+
+            # Myntra canonicalization: /productId/buy
+            if 'myntra' in parsed.netloc.lower():
+                m_id = re.search(r'/(\d+)/buy', clean_path)
+                if m_id:
+                    return f"https://www.myntra.com/{m_id.group(1)}/buy"
+
+            return urllib.parse.urlunparse((
+                parsed.scheme or 'https',
+                parsed.netloc.lower(),
+                clean_path.rstrip('/'),
+                parsed.params,
+                new_query,
+                ''
+            ))
+        except Exception:
+            return cand
+
     @classmethod
     def extract_canonical_product_id(cls, product: dict, retailer: str, direct_url: str) -> str:
         """
@@ -981,48 +1026,7 @@ class SerpApiShoppingService:
 
     @staticmethod
     def canonicalize_url(raw_url: Optional[str]) -> str:
-        """
-        Strips tracking query parameters and canonicalizes retailer product URLs for deduplication.
-        """
-        if not raw_url or not isinstance(raw_url, str):
-            return ""
-        cand = raw_url.strip()
-        try:
-            parsed = urllib.parse.urlparse(cand)
-            tracking_params = {
-                'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-                'srsltid', 'gclid', 'fbclid', 'source', 'ref_', 'psc', 'tag',
-                'pf_rd_r', 'pf_rd_p', 'pf_rd_m', 'pf_rd_s', 'pf_rd_t', 'pf_rd_i',
-                'pd_rd_r', 'pd_rd_w', 'pd_rd_wg', 'linkcode', 'camp', 'creative', 'ref',
-                'spm', '_x_tr_sl', '_x_tr_tl', '_x_tr_hl'
-            }
-            qs = urllib.parse.parse_qs(parsed.query, keep_blank_values=False)
-            cleaned_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params and not k.lower().startswith('utm_')}
-            new_query = urllib.parse.urlencode(cleaned_qs, doseq=True)
-            clean_path = parsed.path
-            
-            # Amazon ASIN canonicalization
-            asin_match = re.search(r'/(?:dp|gp/product)/([A-Z0-9]{10})', clean_path, re.IGNORECASE)
-            if 'amazon' in parsed.netloc.lower() and asin_match:
-                asin = asin_match.group(1).upper()
-                return f"https://www.amazon.in/dp/{asin}"
-
-            # Myntra canonicalization: /productId/buy
-            if 'myntra' in parsed.netloc.lower():
-                m_id = re.search(r'/(\d+)/buy', clean_path)
-                if m_id:
-                    return f"https://www.myntra.com/{m_id.group(1)}/buy"
-
-            return urllib.parse.urlunparse((
-                parsed.scheme or 'https',
-                parsed.netloc.lower(),
-                clean_path.rstrip('/'),
-                parsed.params,
-                new_query,
-                ''
-            ))
-        except Exception:
-            return cand
+        return ProductValidator.canonicalize_url(raw_url)
 
     @staticmethod
     def unwrap_and_clean_url(raw_url: Optional[str]) -> Optional[str]:
