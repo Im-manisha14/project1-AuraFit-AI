@@ -459,21 +459,25 @@ class ProductValidator:
     @classmethod
     def validate_category(
         cls,
-        title_or_product: Any,
+        title_or_product: Any = None,
         description: str = '',
         category: str = '',
         target_category: str = 'dress',
-        target_gender: str = 'female'
+        target_gender: str = 'female',
+        title: Optional[str] = None
     ) -> Tuple[bool, str]:
         """
         Category validation: enforces actual dresses for dress requests, appropriate menswear for male requests.
         Returns (is_valid, reason).
         """
+        if title is not None and title_or_product is None:
+            title_or_product = title
+
         if isinstance(title_or_product, dict):
             prod = title_or_product
         else:
             prod = {
-                'title': str(title_or_product or ''),
+                'title': str(title_or_product or title or ''),
                 'description': description,
                 'category': category
             }
