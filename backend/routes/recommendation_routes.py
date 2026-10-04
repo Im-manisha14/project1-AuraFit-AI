@@ -140,6 +140,9 @@ def get_collections():
                 Outfit.in_stock == True,
                 Outfit.image_url.isnot(None),
                 Outfit.image_url != '',
+                ~Outfit.image_url.like('%1V2w3X4y5%'),
+                ~Outfit.image_url.like('%dummy%'),
+                ~Outfit.image_url.like('%placeholder%'),
                 Outfit.product_url.isnot(None),
                 Outfit.product_url != ''
             )
@@ -151,11 +154,13 @@ def get_collections():
 
         import re
 
+        # Global deduplication across all collection carousels on the dashboard
+        seen_global_col_imgs = set()
+        seen_global_col_urls = set()
+        seen_global_col_ids = set()
+
         def attach_links(outfits, max_items=limit):
             result = []
-            seen_col_imgs = set()
-            seen_col_urls = set()
-            seen_col_ids = set()
             for o in outfits:
                 # 1. Product & category validation (Section 18 & 19)
                 prod_dict = {'title': o.name, 'description': o.description or '', 'category': o.category or ''}
@@ -167,29 +172,29 @@ def get_collections():
                 if not is_compat:
                     continue
 
-                # 2. Image validation & deduplication
+                # 2. Image validation & global cross-collection deduplication
                 img = (o.image_url or '').strip()
-                if not img:
+                if not img or '1V2w3X4y5' in img or 'dummy' in img or 'placeholder' in img:
                     continue
                 tbn_m = re.search(r'q=tbn:([^&]+)', img)
                 img_k = tbn_m.group(1) if tbn_m else img.split('?')[0].strip()
-                if img_k in seen_col_imgs:
+                if img_k in seen_global_col_imgs:
                     continue
 
                 # 3. Canonical URL & ID deduplication
                 url = (o.product_url or '').strip()
                 canon_u = ProductValidator.canonicalize_url(url) if url else ''
-                if canon_u and canon_u in seen_col_urls:
+                if canon_u and canon_u in seen_global_col_urls:
                     continue
 
                 cid = f"{o.store or ''}:{o.external_id or canon_u or o.name}"
-                if cid in seen_col_ids:
+                if cid in seen_global_col_ids:
                     continue
 
-                seen_col_imgs.add(img_k)
+                seen_global_col_imgs.add(img_k)
                 if canon_u:
-                    seen_col_urls.add(canon_u)
-                seen_col_ids.add(cid)
+                    seen_global_col_urls.add(canon_u)
+                seen_global_col_ids.add(cid)
 
                 d = o.to_dict()
                 d['shopping_links'] = engine._generate_shopping_links(o, gender)

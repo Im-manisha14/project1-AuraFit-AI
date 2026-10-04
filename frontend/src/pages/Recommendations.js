@@ -929,36 +929,36 @@ const Recommendations = () => {
                 <p className="font-light">Loading style collections…</p>
               </div>
             ) : (
-              Object.entries(COLLECTION_META).map(([key, meta]) => {
-                const outfits = collections[key];
-                if (!outfits || outfits.length === 0) return null;
-                return (
-                  <div key={key} className="mb-14">
-                    {/* Row Header */}
-                    <div className="flex items-center gap-3 mb-5">
-                      <span className="text-2xl">{meta.icon}</span>
-                      <h3 className="text-xl font-bold text-gray-900 tracking-tight">{meta.title}</h3>
-                      <span className="text-sm text-gray-400 font-light">{outfits.length} looks</span>
-                    </div>
+              (() => {
+                const seenPageImgs = new Set();
+                return Object.entries(COLLECTION_META).map(([key, meta]) => {
+                  const outfits = collections[key];
+                  if (!outfits || outfits.length === 0) return null;
+                  const uniqueOutfits = outfits.filter(outfit => {
+                    if (failedImages.has(outfit.id)) return false;
+                    const img = (outfit.image_url || outfit.image || '').trim();
+                    if (!img || img.includes('1V2w3X4y5') || img.includes('dummy') || img.includes('placeholder')) return false;
+                    const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
+                    if (seenPageImgs.has(imgKey)) return false;
+                    seenPageImgs.add(imgKey);
+                    return true;
+                  });
+                  if (uniqueOutfits.length === 0) return null;
+                  return (
+                    <div key={key} className="mb-14">
+                      {/* Row Header */}
+                      <div className="flex items-center gap-3 mb-5">
+                        <span className="text-2xl">{meta.icon}</span>
+                        <h3 className="text-xl font-bold text-gray-900 tracking-tight">{meta.title}</h3>
+                        <span className="text-sm text-gray-400 font-light">{uniqueOutfits.length} looks</span>
+                      </div>
 
-                    {/* Horizontal Scroll Row */}
-                    <div
-                      className="flex gap-5 pb-4 items-stretch"
-                      style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                    >
-                      {(() => {
-                        const seenRowImgs = new Set();
-                        return outfits
-                          .filter(outfit => {
-                            if (failedImages.has(outfit.id)) return false;
-                            const img = (outfit.image_url || outfit.image || '').trim();
-                            if (!img) return false;
-                            const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
-                            if (seenRowImgs.has(imgKey)) return false;
-                            seenRowImgs.add(imgKey);
-                            return true;
-                          })
-                          .map((outfit, idx) => (
+                      {/* Horizontal Scroll Row */}
+                      <div
+                        className="flex gap-5 pb-4 items-stretch"
+                        style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                      >
+                        {uniqueOutfits.map((outfit, idx) => (
                         <motion.div
                           key={outfit.id}
                           initial={{ opacity: 0, x: 20 }}
@@ -1092,12 +1092,12 @@ const Recommendations = () => {
                             </div>
                           </div>
                         </motion.div>
-                      ));
-                    })()}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
-              })
+                  );
+                });
+              })()
             )}
           </motion.div>
         )}
