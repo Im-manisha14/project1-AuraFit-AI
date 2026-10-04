@@ -52,11 +52,16 @@ OCCASION_DB_MAP = {
 
 class ProductValidator:
     """
-    Strict validation layer for live shopping products.
+    Strict validation layer for live shopping products per AuraFit specification.
     Enforces:
-      1. Strict Gender Normalization & Filtering (Zero men's items for female profiles, zero women's items for male profiles)
-      2. Category Filtering (Only actual dresses for female dress requests, appropriate menswear for male requests)
-      3. Image & Identity Validation (Valid non-placeholder, non-mock, authentic live images)
+      1. Strict Gender Normalization & Hard Opposite-Gender Rejection
+      2. Kids / Non-Adult Hard Exclusion (zero kids products for adult profiles)
+      3. Strict Category Filtering (Only actual dresses for female dress requests, menswear for male requests)
+      4. False "Dress" keyword rejection (dress shoes, dress shirts, dress pants, dress material, etc.)
+      5. Hard Category Exclusions (shoes, bags, jewellery, accessories, bottoms, standalone tops, sleepwear/homewear, towels/robes)
+      6. Canonical Product Identity & Multi-Level Deduplication
+      7. Image & URL Validation
+      8. Current Selling Price Range Filtering
     """
 
     GENDER_NORMALIZATION = {
@@ -65,72 +70,105 @@ class ProductValidator:
         'woman': 'female',
         'womens': 'female',
         'ladies': 'female',
-        'girl': 'female',
-        'girls': 'female',
+        'lady': 'female',
         'male': 'male',
         'men': 'male',
         'man': 'male',
         'mens': 'male',
         'gentlemen': 'male',
-        'boy': 'male',
-        'boys': 'male',
+        'gentleman': 'male',
     }
 
     # Strict male regex patterns (using word boundaries to prevent matching 'women' as 'men')
     MALE_PATTERNS = [
         r"\bmen's\b", r"\bmens\b", r"\bmen\b", r"\bman\b", r"\bmale\b",
-        r"\bgentlemen\b", r"\bboy's\b", r"\bboys\b", r"\bboy\b", r"\bhim\b",
-        r"\bmenswear\b",
+        r"\bgentlemen\b", r"\bgentleman\b", r"\bhim\b",
+        r"\bmenswear\b", r"\bmenwear\b",
     ]
 
     # Strict female regex patterns (using word boundaries)
     FEMALE_PATTERNS = [
         r"\bwomen's\b", r"\bwomens\b", r"\bwomen\b", r"\bwoman\b", r"\bfemale\b",
-        r"\bladies\b", r"\blady\b", r"\bgirl's\b", r"\bgirls\b", r"\bgirl\b",
-        r"\bmaternity\b", r"\bher\b", r"\bwomenswear\b",
+        r"\bladies\b", r"\blady\b", r"\bwomenswear\b", r"\bwomenwear\b", r"\bladieswear\b",
+        r"\bmaternity\b", r"\bher\b",
+    ]
+
+    # Kids patterns: MUST be rejected for adult profiles (Section 6)
+    KIDS_PATTERNS = [
+        r"\bkids?\b", r"\bchildren\b", r"\bchild\b", r"\bbaby\b", r"\bbabies\b",
+        r"\btoddlers?\b", r"\bjuniors?\b", r"\bteens?\b", r"\bteenagers?\b",
+        r"\bboys?\b", r"\bboy's\b", r"\bgirls?\b", r"\bgirl's\b",
+        r"\binfants?\b"
     ]
 
     # Inherently female garments
     FEMALE_GARMENTS = [
-        r"\bdress\b", r"\bdresses\b", r"\bgown\b", r"\bgowns\b", r"\bskirt\b", r"\bskirts\b",
+        r"\bdress\b", r"\bdresses\b", r"\bgown\b", r"\bgowns\b",
         r"\bkurti\b", r"\bkurtis\b", r"\banarkali\b", r"\blehenga\b", r"\bsaree\b", r"\bsari\b",
-        r"\bblouse\b", r"\bbra\b", r"\blingerie\b", r"\bmaxi\b", r"\bmidi\b", r"\bmini dress\b",
-        r"\bbodycon\b", r"\bwrap dress\b", r"\bparty dress\b", r"\bsummer dress\b",
-        r"\bsundress\b", r"\bsundresses\b",
+        r"\bskirt\b", r"\bskirts\b", r"\bblouse\b", r"\bbra\b", r"\blingerie\b",
+        r"\bmaxi\b", r"\bmidi\b", r"\bmini dress\b", r"\bbodycon\b", r"\bwrap dress\b",
+        r"\bparty dress\b", r"\bsummer dress\b", r"\bsundress\b", r"\bsundresses\b",
     ]
 
     # Inherently male garments
     MALE_GARMENTS = [
-        r"\bkurta pyjama\b", r"\bsherwani\b", r"\bdhoti\b", r"\bboxers\b", r"\bmen's suit\b",
-        r"\bpolo t-shirt\b",
+        r"\bkurta(?:\s+pyjama|\s+pajama)?\b", r"\bsherwani\b", r"\bdhoti\b", r"\bboxers\b",
+        r"\b(?:men's\s+)?suit\b", r"\bpolo\s+t-?shirt\b", r"\bpolo\b", r"\btuxedo\b",
+        r"\bnehru\s+jacket\b", r"\bbandhgala\b", r"\bchinos?\b", r"\bmen's\s+shirt\b",
+        r"\bwaistcoat\b",
     ]
 
-    # Strict required patterns for dresses
+    # Strict required patterns for dresses (Section 7)
     DRESS_REQUIRED_PATTERNS = [
-        r'\bmidi dress\b', r'\bmaxi dress\b', r'\bmini dress\b', r'\bbodycon dress\b',
-        r'\bwrap dress\b', r'\bparty dress\b', r'\bcasual dress\b', r'\bfloral dress\b',
-        r'\bsummer dress\b', r'\bevening dress\b', r'\bcocktail dress\b', r'\ba-line dress\b',
-        r'\bfit (and|&) flare dress\b', r'\bshirt dress\b', r'\bslip dress\b', r'\btiered dress\b',
-        r'\bskater dress\b', r'\bhalter dress\b', r'\bsheath dress\b', r'\bshift dress\b',
-        r'\bprom dress\b', r'\bwedding dress\b', r'\bruffle dress\b', r'\bcut-?out dress\b',
-        r'\bdress\b', r'\bdresses\b', r'\bsundress\b', r'\bsundresses\b', r'\bgown\b', r'\bgowns\b',
-        r'\bkurti\b', r'\bkurtis\b', r'\banarkali\b', r'\blehenga\b', r'\bsaree\b', r'\bsari\b',
+        r'\bmidi dress(?:es)?\b', r'\bmaxi dress(?:es)?\b', r'\bmini dress(?:es)?\b',
+        r'\bparty dress(?:es)?\b', r'\bsummer dress(?:es)?\b', r'\bwinter dress(?:es)?\b',
+        r'\bevening dress(?:es)?\b', r'\bcocktail dress(?:es)?\b', r'\bbodycon dress(?:es)?\b',
+        r'\bwrap dress(?:es)?\b', r'\ba-line dress(?:es)?\b', r'\bfit (?:and|&) flare dress(?:es)?\b',
+        r'\bshirt dress(?:es)?\b', r'\bt-shirt dress(?:es)?\b', r'\btshirt dress(?:es)?\b',
+        r'\btee dress(?:es)?\b', r'\bslip dress(?:es)?\b', r'\bskater dress(?:es)?\b',
+        r'\bgown(?:s)?\b', r'\bmaxi gown(?:s)?\b', r'\bball gown(?:s)?\b', r'\bevening gown(?:s)?\b',
+        r'\bfloral dress(?:es)?\b', r'\bprinted dress(?:es)?\b', r'\bformal dress(?:es)?\b',
+        r'\bcasual dress(?:es)?\b', r'\bdenim dress(?:es)?\b', r'\bknit dress(?:es)?\b',
+        r'\bsatin dress(?:es)?\b', r'\bsequin dress(?:es)?\b', r'\bruched dress(?:es)?\b',
+        r'\bhalter dress(?:es)?\b', r'\boff shoulder dress(?:es)?\b', r'\bone shoulder dress(?:es)?\b',
+        r'\bsheath dress(?:es)?\b', r'\bshift dress(?:es)?\b', r'\bprom dress(?:es)?\b',
+        r'\bwedding dress(?:es)?\b', r'\bruffle dress(?:es)?\b', r'\bcut-?out dress(?:es)?\b',
+        r'\btiered dress(?:es)?\b', r'\bpleated dress(?:es)?\b', r'\bsmocked dress(?:es)?\b',
+        r'\bstrapless dress(?:es)?\b', r'\bbackless dress(?:es)?\b', r'\bflared dress(?:es)?\b',
+        r'\bpeplum dress(?:es)?\b', r'\bbabydoll dress(?:es)?\b', r'\bkaftan dress(?:es)?\b',
+        r'\bcaftan dress(?:es)?\b', r'\bsweater dress(?:es)?\b', r'\bblazer dress(?:es)?\b',
+        r'\banarkali(?:\s+(?:suit|dress|gown))?\b', r'\bkurti(?:\s+dress)?\b', r'\bkurtis\b',
+        r'\bsaree(?:s)?\b', r'\bsari(?:s)?\b', r'\bsundress(?:es)?\b', r'\bdress(?:es)?\b',
     ]
 
-    # Explicit excluded categories that must NEVER be returned when category is dress
+    # False dress matches that must be REJECTED (Section 8)
+    FALSE_DRESS_PATTERNS = [
+        r'\bdress\s+(?:shoes?|socks?|shirts?|trousers?|pants?|boots?|sandals?|material|fabric|accessories|belts?|bags?|cases?)\b',
+        r'\b(?:shoes?|socks?|shirts?|trousers?|pants?|boots?|sandals?|material|fabric|accessories|belts?|bags?)\s+for\s+(?:party\s+)?dress(?:es)?\b',
+        r'\b(?:unstitched|semi[- ]stitched)\s+(?:dress|suit|fabric|material|piece)\b',
+        r'\b(?:dress\s+material|unstitched\s+fabric)\b',
+        r'\bdressing\s+(?:table|mirror|room)\b',
+        r'\bfancy\s+dress(?:\s+costume)?\b',
+    ]
+
+    # Category Exclusions for dresses (Section 9 & 10)
     EXCLUDED_DRESS_PATTERNS = [
-        r'\bdress shoes?\b', r'\bdress shirts?\b', r'\bdress socks?\b', r'\bdress material\b',
-        r'\bdressing (table|mirror)\b', r'\bfancy dress\b',
-        r'\b(shoes?|sneakers?|sandals?|heels?|boots?|flats?|loafers?|pumps?|footwear)\b',
-        r'\b(handbags?|bags?|purse|clutch|wallet|tote|backpack)\b',
-        r'\b(watches?|smartwatch|earrings?|necklaces?|bracelets?|bangles?|jewelry|jewellery|rings?|anklet|pendant)\b',
-        r'\b(sunglasses|glasses|hats?|caps?|scarf|scarves|socks?)\b',
-        r'\b(t-shirts?|tshirts?|tee|tees)\b',
-        r'\b(trousers?|pants?|jeans?|shorts|leggings?|trackpants?)\b',
-        r'\b(skirts?)\b',
-        r'\b(bras?|panties|lingerie|underwear)\b',
-        r'\b(towels?|bath\s*towel|bathrobe|nighty|nightwear|sleepwear|bath)\b',
-        r'\b(furniture|curtains?|bedsheets?|cosmetics?|makeup|perfume|lipstick)\b',
+        # Shoes / Footwear
+        (r'\b(shoes?|sneakers?|sandals?|heels?|pumps?|slippers?|loafers?|boots?|footwear|wedges?|flats?|mules?|stilettos?|slides?|chappals?|flip[- ]flops?|clogs?|espadrilles?|oxfords?|derbys?|booties?)\b', 'footwear'),
+        # Bags
+        (r'\b(handbags?|bags?|purse|clutch|wallets?|totes?|backpacks?|sling\s*bags?|potli|crossbody|shoulder\s*bags?|satchels?|duffles?|suitcases?)\b', 'bag'),
+        # Jewellery
+        (r'\b(earrings?|necklaces?|bracelets?|bangles?|rings?|anklets?|jewellery|jewelry|pendants?|chains?|chokers?|mangalsutras?|jhumkas?|nose\s*pins?)\b', 'jewellery'),
+        # Accessories
+        (r'\b(watches?|smartwatch|sunglasses?|eyewear|glasses|belts?|scarfs?|scarves|hair\s*accessories|hair\s*accessory|hairbands?|headbands?|scrunchies?|hats?|caps?|socks?|stockings?|stoles?)\b', 'accessory'),
+        # Bottoms (shorts as garment, not short as adjective)
+        (r'\b(trousers?|pants?|jeans?|denim\s+pants|shorts|leggings?|joggers?|culottes?|palazzos?|track\s*pants?|tights?|capris?)\b', 'bottoms'),
+        # Standalone Tops (subject to dress exception e.g. shirt dress)
+        (r'\b(t-shirts?|tshirts?|tees?|shirts?|blouses?|crop\s*tops?|tops?|camisoles?|tank\s*tops?|corsets?|hoodies?|sweatshirts?|sweaters?|cardigans?|shrugs?|jackets?|blazers?|coats?)\b', 'tops'),
+        # Sleepwear / Homewear / Undergarments / Towels / Robes
+        (r'\b(nightwear|night\s*suit|pyjamas?|pajamas?|sleepwear|robes?|bathrobes?|dressing\s*gown|lounge\s*set|loungewear|house\s*dress|towels?|bath\s*towels?|shower\s*robes?|bedsheets?|curtains?|quilts?|duvets?|pillows?|nightys?|nighties?|nightdress(?:es)?|lingerie|bras?|panties?|panty|underwear|shapewear)\b', 'sleepwear_or_homewear'),
+        # Cosmetics / Beauty / Personal care
+        (r'\b(cosmetics?|makeup|perfumes?|lipsticks?|lotions?|creams?|serums?|foundations?|eyeliners?|shampoos?|conditioners?|soaps?|skincare|haircare)\b', 'beauty'),
     ]
 
     # Menswear accepted patterns
@@ -164,6 +202,90 @@ class ProductValidator:
         return cls.GENDER_NORMALIZATION.get(g, 'unknown')
 
     @classmethod
+    def is_kids_product(cls, normalized_text: str) -> Tuple[bool, str]:
+        """Detects if a product is intended for children/teens/babies."""
+        for pat in cls.KIDS_PATTERNS:
+            m = re.search(pat, normalized_text)
+            if m:
+                return True, m.group(0)
+        return False, ""
+
+    @classmethod
+    def normalize_title(cls, title: str) -> str:
+        """
+        Normalizes a product title per Section 16:
+          - lowercase
+          - remove punctuation
+          - normalize whitespace
+          - remove tracking fragments
+          - remove irrelevant size tokens (e.g. Size M, - Size: XL, Size 38)
+          - remove marketing / fluff words
+        """
+        if not title:
+            return ""
+        t = title.lower()
+        t = re.sub(r'https?://\S+', '', t)
+        # Remove size markers e.g. "- Size M", "(Size: L)", "Size 38", "/ M"
+        t = re.sub(r'[\-\|\(\[\/]?\s*\b(?:size|sz)?\s*(?:xxxl|xxl|xl|xs|[sml])\b\s*[\)\/\]]?', ' ', t)
+        t = re.sub(r'[\-\|\(\[\/]?\s*\b(?:size|sz)\s*[:\-]?\s*\d+\b\s*[\)\/\]]?', ' ', t)
+        # Remove punctuation
+        t = re.sub(r'[^a-z0-9\s]', ' ', t)
+        noise = {
+            'new', 'latest', 'stylish', 'trendy', 'hot', 'exclusive', 'offer', 'sale',
+            'online', 'india', 'buy', 'best', 'fashion', 'collection', 'pack', 'piece',
+            'premium', 'women', 'womens', 'men', 'mens', 'unisex'
+        }
+        words = [w for w in t.split() if w not in noise]
+        return " ".join(words)
+
+    @classmethod
+    def extract_canonical_product_id(cls, product: dict, retailer: str, direct_url: str) -> str:
+        """
+        Deterministic canonical product identity per Section 13:
+          Use strongest available identifier in order:
+            1. retailer product ID / merchant product ID / ASIN / PID
+            2. SKU
+            3. extracted direct URL identifier
+            4. fallback hash of retailer + canonical URL or normalized title
+        """
+        ret_prefix = (retailer or 'store').lower().replace(' ', '').replace('&', 'n')
+        for k in ('retailer_product_id', 'merchant_product_id', 'product_id', 'asin', 'sku', 'id'):
+            val = product.get(k)
+            if val and str(val).strip():
+                clean_val = str(val).strip().replace('serpapi_', '').replace('serpapi_sim_', '')
+                if clean_val:
+                    return f"{ret_prefix}:{clean_val}"
+
+        if direct_url:
+            u = direct_url.lower()
+            asin_m = re.search(r'/(?:dp|gp/product)/([a-z0-9]{10})', u)
+            if 'amazon' in ret_prefix and asin_m:
+                return f"amazon:{asin_m.group(1).upper()}"
+            myntra_m = re.search(r'/(\d+)/buy', direct_url)
+            if 'myntra' in ret_prefix and myntra_m:
+                return f"myntra:{myntra_m.group(1)}"
+            ajio_m = re.search(r'/p/([0-9a-z_]+)', u)
+            if 'ajio' in ret_prefix and ajio_m:
+                return f"ajio:{ajio_m.group(1)}"
+            flipkart_m = re.search(r'pid=([a-z0-9]+)', u)
+            if 'flipkart' in ret_prefix and flipkart_m:
+                return f"flipkart:{flipkart_m.group(1).upper()}"
+            meesho_m = re.search(r'/p/([0-9a-z]+)', u)
+            if 'meesho' in ret_prefix and meesho_m:
+                return f"meesho:{meesho_m.group(1)}"
+            hm_m = re.search(r'/productpage\.([0-9]+)\.html', u)
+            if ('h&m' in ret_prefix or 'hm' in ret_prefix) and hm_m:
+                return f"hm:{hm_m.group(1)}"
+
+            norm_u = SerpApiShoppingService.canonicalize_url(direct_url) if direct_url else ""
+            h = hashlib.sha256(norm_u.encode('utf-8')).hexdigest()[:16]
+            return f"{ret_prefix}:{h}"
+
+        norm_t = cls.normalize_title(product.get('title') or product.get('name') or '')
+        h = hashlib.sha256(f"{ret_prefix}_{norm_t}".encode('utf-8')).hexdigest()[:16]
+        return f"{ret_prefix}:{h}"
+
+    @classmethod
     def is_gender_compatible(
         cls,
         product: dict,
@@ -171,60 +293,68 @@ class ProductValidator:
         target_category: str = 'dress'
     ) -> Tuple[bool, str, str]:
         """
-        Validates product gender against AuraFit profile:
-          If profile = Female:
-            Allow: 'female', 'unisex'
-            Reject: 'male'
-            If 'unknown': accept only if category relevance (e.g. dress) matches
-          If profile = Male:
-            Allow: 'male', 'unisex'
-            Reject: 'female'
-            If 'unknown': accept only if category relevance (e.g. menswear) matches
-        Returns (is_compatible, detected_gender, reason)
+        Centralized gender classification per Section 4, 5, 6.
+        Returns: (is_compatible_bool, detected_gender, reason)
+        For women's profiles: rejects any opposite gender (men's) or kids products.
+        For men's profiles: rejects any opposite gender (women's) or kids products.
         """
         norm_target = cls.normalize_gender(target_gender)
         if norm_target not in ('female', 'male'):
             return True, 'unconstrained', 'Gender unconstrained'
 
-        det_gender = detect_product_gender(product)
+        # Extract all textual signals per Section 3
+        title = str(product.get('title') or product.get('name') or '')
+        desc = str(product.get('description') or product.get('snippet') or '')
+        cat = str(product.get('category') or '')
+        ptype = str(product.get('product_type') or '')
+        dept = str(product.get('department') or '')
+        brand = str(product.get('brand') or '')
+        ret = str(product.get('retailer') or product.get('store') or product.get('source') or '')
+        url = str(product.get('link') or product.get('product_url') or '')
+        breadcrumbs = str(product.get('breadcrumbs') or '')
+
+        normalized_text = f"{title} {desc} {cat} {ptype} {dept} {brand} {ret} {url} {breadcrumbs}".lower()
+
+        # Section 6: KIDS MUST NOT BE MIXED WITH ADULT RESULTS
+        is_kid, kid_word = cls.is_kids_product(normalized_text)
+        if is_kid:
+            return False, 'kids', f"Kids product rejected for adult profile ({kid_word})"
 
         if norm_target == 'female':
-            if det_gender == 'male':
+            # Hard Opposite-Gender Rejection (Section 5)
+            has_male_signal = any(bool(re.search(pat, normalized_text)) for pat in cls.MALE_PATTERNS)
+            if has_male_signal:
                 return False, 'male', 'rejected opposite gender (male) product'
-            elif det_gender == 'female':
+
+            # Positive Female Signals (Section 4)
+            has_female_signal = any(bool(re.search(pat, normalized_text)) for pat in cls.FEMALE_PATTERNS)
+            has_female_garment = any(bool(re.search(pat, normalized_text)) for pat in cls.FEMALE_GARMENTS)
+            has_unisex = any(bool(re.search(pat, normalized_text)) for pat in cls.UNISEX_PATTERNS)
+
+            if has_female_signal or has_female_garment:
                 return True, 'female', 'valid female product'
-            elif det_gender == 'unisex':
+            if has_unisex:
                 return True, 'unisex', 'valid unisex product'
-            else: # 'unknown'
-                cat_ok, c_msg = cls.validate_category(
-                    title=product.get('title', ''),
-                    description=product.get('description', '') or product.get('snippet', ''),
-                    category=product.get('category', ''),
-                    target_category=target_category,
-                    target_gender=norm_target
-                )
-                if cat_ok:
-                    return True, 'unknown', 'accepted via category relevance'
-                return False, 'unknown', f'no female evidence and {c_msg}'
+
+            return False, 'unknown', 'no positive female signals found'
 
         elif norm_target == 'male':
-            if det_gender == 'female':
+            # Hard Opposite-Gender Rejection (Section 5)
+            has_female_signal = any(bool(re.search(pat, normalized_text)) for pat in cls.FEMALE_PATTERNS + cls.FEMALE_GARMENTS)
+            if has_female_signal:
                 return False, 'female', 'rejected opposite gender (female) product'
-            elif det_gender == 'male':
+
+            # Positive Male Signals (Section 4)
+            has_male_signal = any(bool(re.search(pat, normalized_text)) for pat in cls.MALE_PATTERNS)
+            has_male_garment = any(bool(re.search(pat, normalized_text)) for pat in cls.MALE_GARMENTS)
+            has_unisex = any(bool(re.search(pat, normalized_text)) for pat in cls.UNISEX_PATTERNS)
+
+            if has_male_signal or has_male_garment:
                 return True, 'male', 'valid male product'
-            elif det_gender == 'unisex':
+            if has_unisex:
                 return True, 'unisex', 'valid unisex product'
-            else: # 'unknown'
-                cat_ok, c_msg = cls.validate_category(
-                    title=product.get('title', ''),
-                    description=product.get('description', '') or product.get('snippet', ''),
-                    category=product.get('category', ''),
-                    target_category=target_category,
-                    target_gender=norm_target
-                )
-                if cat_ok:
-                    return True, 'unknown', 'accepted via menswear category relevance'
-                return False, 'unknown', f'no male evidence and {c_msg}'
+
+            return False, 'unknown', 'no positive male signals found'
 
         return False, 'unknown', 'invalid gender matching'
 
@@ -251,38 +381,85 @@ class ProductValidator:
         return ok, reason
 
     @classmethod
+    def is_actual_dress(cls, product: dict) -> Tuple[bool, str, str]:
+        """
+        Strict women's dress classification per Section 7, 8, 9, 10, 11.
+        Returns: (is_dress_bool, detected_category, reason)
+        """
+        title = str(product.get('title') or product.get('name') or '').strip()
+        desc = str(product.get('description') or product.get('snippet') or '')
+        cat = str(product.get('category') or '')
+        ptype = str(product.get('product_type') or '')
+        url = str(product.get('link') or product.get('product_url') or '')
+        breadcrumbs = str(product.get('breadcrumbs') or '')
+
+        normalized_text = f"{title} {desc} {cat} {ptype} {url} {breadcrumbs}".lower()
+        title_low = title.lower()
+
+        # Section 8: False "Dress" Matches MUST be rejected
+        for pat in cls.FALSE_DRESS_PATTERNS:
+            m = re.search(pat, normalized_text)
+            if m:
+                return False, 'false_dress', f"rejected false dress match ({m.group(0)})"
+
+        # Section 11: Check primary category priority (e.g. "Women's Heels for Party Dress")
+        primary_for_dress = re.search(r'\b(shoes?|sandals?|heels?|boots?|sneakers?|pumps?|clutch|bags?|handbags?|earrings?|necklace|jewellery|jewelry)\s+for\s+(?:(?:women\'?s|party|evening|summer)\s+)?dress(?:es)?\b', normalized_text)
+        if primary_for_dress:
+            return False, 'excluded_accessory', f"primary product is {primary_for_dress.group(1)} for dress"
+
+        # URL path check for primary excluded categories
+        if url:
+            u_low = url.lower()
+            for excluded_path, cat_name in [
+                ('/shoes/', 'footwear'), ('/footwear/', 'footwear'), ('/sandals/', 'footwear'),
+                ('/bags/', 'bag'), ('/handbags/', 'bag'), ('/jewellery/', 'jewellery'),
+                ('/jewelry/', 'jewellery'), ('/accessories/', 'accessory'), ('/bottoms/', 'bottoms'),
+                ('/pants/', 'bottoms'), ('/jeans/', 'bottoms'), ('/tops/', 'tops')
+            ]:
+                if excluded_path in u_low and not any(dp in u_low for dp in ['dress', 'dresses']):
+                    return False, cat_name, f"URL path belongs to excluded category {cat_name}"
+
+        # Section 9 & 10: Hard Category Exclusion List
+        # Mask approved dress compounds so their sub-words (e.g. shirt in "shirt dress") don't trigger top exclusions
+        t_masked = re.sub(
+            r'\b(?:shirt|t-shirt|tshirt|tee|sweater|blazer|jacket|hoodie|sweatshirt|slip|camisole)\s+dress(?:es)?\b',
+            '[DRESS_COMPOUND]',
+            normalized_text,
+            flags=re.IGNORECASE
+        )
+
+        for pat, cat_name in cls.EXCLUDED_DRESS_PATTERNS:
+            m = re.search(pat, t_masked)
+            if m:
+                matched_term = m.group(0)
+                return False, cat_name, f"excluded category ({cat_name}: {matched_term})"
+
+        # Section 7: Must match at least one approved dress style
+        matched_dress = any(bool(re.search(dp, title_low)) for dp in cls.DRESS_REQUIRED_PATTERNS) or \
+                        any(bool(re.search(dp, normalized_text)) for dp in cls.DRESS_REQUIRED_PATTERNS)
+
+        if matched_dress:
+            return True, 'dress', 'valid women\'s dress'
+
+        return False, 'non_dress', 'no approved dress pattern matched'
+
+    @classmethod
     def detect_category(cls, title: str, description: str = '', category_field: str = '') -> str:
         """Detect product category from title, description, and metadata for structured logging."""
-        combined = f"{title} {description} {category_field}".lower()
-        if any(bool(re.search(dp, combined)) for dp in cls.DRESS_REQUIRED_PATTERNS):
-            for exp in cls.EXCLUDED_DRESS_PATTERNS:
-                if exp == r'\b(shirts?)\b' and 'shirt dress' in combined:
-                    continue
-                if re.search(exp, combined):
-                    return 'non-dress accessory/clothing'
+        p_mock = {'title': title, 'description': description, 'category': category_field}
+        is_d, det_c, _ = cls.is_actual_dress(p_mock)
+        if is_d:
             return 'dress'
-        if any(bool(re.search(p, combined)) for p in [r'\b(shoes?|sneakers?|sandals?|heels?|boots?|loafers?|footwear)\b']):
-            return 'shoes/footwear'
-        if any(bool(re.search(p, combined)) for p in [r'\b(t-shirts?|tshirt|tee)\b']):
-            return 't-shirt'
-        if any(bool(re.search(p, combined)) for p in [r'\b(shirts?)\b']):
-            return 'shirt'
-        if any(bool(re.search(p, combined)) for p in [r'\b(trousers?|pants?|jeans?|chinos?|shorts?)\b']):
-            return 'pants/trousers'
-        if any(bool(re.search(p, combined)) for p in [r'\b(suits?|blazers?)\b']):
-            return 'suit/blazer'
-        if any(bool(re.search(p, combined)) for p in [r'\b(handbags?|bags?|purse|clutch|wallet|tote)\b']):
-            return 'handbag'
-        if any(bool(re.search(p, combined)) for p in [r'\b(watches?|smartwatch|earrings?|necklaces?|bracelets?|jewelry)\b']):
-            return 'jewelry/accessory'
-        if any(bool(re.search(p, combined)) for p in [r'\b(skirts?)\b']):
-            return 'skirt'
+        combined = f"{title} {description} {category_field}".lower()
+        for pat, c_name in cls.EXCLUDED_DRESS_PATTERNS:
+            if re.search(pat, combined):
+                return c_name
         return 'general clothing'
 
     @classmethod
     def validate_category(
         cls,
-        title: str,
+        title_or_product: Any,
         description: str = '',
         category: str = '',
         target_category: str = 'dress',
@@ -292,33 +469,30 @@ class ProductValidator:
         Category validation: enforces actual dresses for dress requests, appropriate menswear for male requests.
         Returns (is_valid, reason).
         """
+        if isinstance(title_or_product, dict):
+            prod = title_or_product
+        else:
+            prod = {
+                'title': str(title_or_product or ''),
+                'description': description,
+                'category': category
+            }
+
         norm_gender = cls.normalize_gender(target_gender)
-        t = title.lower()
 
         if norm_gender == 'female' or target_category == 'dress':
-            # Check false positives & excluded non-dress products first
-            for exp in cls.EXCLUDED_DRESS_PATTERNS:
-                # Exception: "shirt dress" and "t-shirt dress" are valid dress styles
-                if exp == r'\b(shirts?)\b' and 'shirt dress' in t:
-                    continue
-                if 't-shirt' in exp and any(td in t for td in ['t-shirt dress', 'tshirt dress', 'tee dress']):
-                    continue
-                if re.search(exp, t):
-                    return False, f'non-dress product category matched ({exp})'
-
-            # Must match at least one approved dress keyword
-            matched_dress = any(bool(re.search(dp, t)) for dp in cls.DRESS_REQUIRED_PATTERNS)
-            if matched_dress:
-                return True, 'valid dress category'
-            return False, 'does not contain an approved dress keyword'
+            is_dress, det_cat, reason = cls.is_actual_dress(prod)
+            return is_dress, reason
 
         elif norm_gender == 'male':
+            t = f"{prod.get('title', '')} {prod.get('description', '')}".lower()
             for exp in cls.MENSWEAR_EXCLUDED_PATTERNS:
-                if re.search(exp, t):
-                    return False, f'non-menswear or excluded category matched ({exp})'
-            matched_menswear = any(bool(re.search(mp, t)) for mp in cls.MENSWEAR_ACCEPTED_PATTERNS)
-            if matched_menswear:
-                return True, 'valid menswear category'
+                m = re.search(exp, t)
+                if m:
+                    return False, f"non-menswear or excluded category matched ({m.group(0)})"
+            for mp in cls.MENSWEAR_ACCEPTED_PATTERNS:
+                if re.search(mp, t):
+                    return True, 'valid menswear category'
             return False, 'does not match approved menswear categories'
 
         return True, 'category unconstrained'
@@ -332,7 +506,7 @@ class ProductValidator:
         if not (url_clean.startswith('http://') or url_clean.startswith('https://')):
             return False, 'Invalid image protocol'
         # Reject placeholders, mock domains, Unsplash, generic defaults
-        if any(bad in url_clean for bad in ['aurafit.store', 'example.com', 'placeholder', 'unsplash', 'default_avatar', 'no-image']):
+        if any(bad in url_clean for bad in ['aurafit.store', 'example.com', 'placeholder', 'unsplash', 'default_avatar', 'no-image', 'avatar']):
             return False, 'Disallowed placeholder or mock image domain'
         return True, 'Valid authentic image'
 
@@ -341,86 +515,17 @@ def detect_product_gender(product: dict) -> str:
     """
     Detects product gender strictly using actual shopping data evidence.
     Returns: 'female', 'male', 'unisex', or 'unknown'.
-
-    Priority:
-      1. Structured retailer/category metadata (category, product_type, department, gender)
-      2. Product title
-      3. Description/snippet
-      4. Inherently gendered garments (dress, gown, kurti, saree, etc. vs suit, sherwani, etc.)
-      5. Unknown (if no reliable evidence, do not guess)
     """
     if not product or not isinstance(product, dict):
         return 'unknown'
-
-    # Priority 1: Structured retailer/category metadata
-    cat_meta = " ".join([
-        str(product.get("category", "") or ""),
-        str(product.get("product_type", "") or ""),
-        str(product.get("department", "") or ""),
-        str(product.get("gender", "") or "")
-    ]).lower()
-
-    if cat_meta:
-        has_cat_female = any(bool(re.search(pat, cat_meta)) for pat in ProductValidator.FEMALE_PATTERNS)
-        has_cat_male = any(bool(re.search(pat, cat_meta)) for pat in ProductValidator.MALE_PATTERNS)
-        has_cat_unisex = any(bool(re.search(pat, cat_meta)) for pat in ProductValidator.UNISEX_PATTERNS)
-
-        if has_cat_unisex or (has_cat_female and has_cat_male):
-            return 'unisex'
-        if has_cat_female and not has_cat_male:
-            return 'female'
-        if has_cat_male and not has_cat_female:
-            return 'male'
-
-    # Priority 2: Product title
-    title = str(product.get("title", "") or "").lower()
-    if title:
-        has_title_female = any(bool(re.search(pat, title)) for pat in ProductValidator.FEMALE_PATTERNS)
-        has_title_male = any(bool(re.search(pat, title)) for pat in ProductValidator.MALE_PATTERNS)
-        has_title_unisex = any(bool(re.search(pat, title)) for pat in ProductValidator.UNISEX_PATTERNS)
-
-        if has_title_unisex or (has_title_female and has_title_male):
-            return 'unisex'
-        if has_title_female and not has_title_male:
-            return 'female'
-        if has_title_male and not has_title_female:
-            return 'male'
-
-    # Priority 3: Description/snippet
-    desc = " ".join([
-        str(product.get("description", "") or ""),
-        str(product.get("snippet", "") or "")
-    ]).lower()
-    if desc:
-        has_desc_female = any(bool(re.search(pat, desc)) for pat in ProductValidator.FEMALE_PATTERNS)
-        has_desc_male = any(bool(re.search(pat, desc)) for pat in ProductValidator.MALE_PATTERNS)
-        has_desc_unisex = any(bool(re.search(pat, desc)) for pat in ProductValidator.UNISEX_PATTERNS)
-
-        if has_desc_unisex or (has_desc_female and has_desc_male):
-            return 'unisex'
-        if has_desc_female and not has_desc_male:
-            return 'female'
-        if has_desc_male and not has_desc_female:
-            return 'male'
-
-    # Priority 4: Inherently gendered garments
-    combined_text = f"{title} {desc}".lower()
-    is_false_dress = any(bool(re.search(exp, combined_text)) for exp in [
-        r'\bdress shoes?\b', r'\bdress shirts?\b', r'\bdress socks?\b', r'\bdress material\b',
-        r'\bdressing (table|mirror)\b', r'\bfancy dress\b'
-    ])
-    has_female_garment = any(bool(re.search(pat, combined_text)) for pat in ProductValidator.FEMALE_GARMENTS)
-    has_male_garment = any(bool(re.search(pat, combined_text)) for pat in ProductValidator.MALE_GARMENTS)
-    if is_false_dress and not any(bool(re.search(pat, combined_text)) for pat in [r'\bgown\b', r'\bskirt\b', r'\bkurti\b', r'\blehenga\b', r'\bsaree\b']):
-        has_female_garment = False
-
-    if has_female_garment and not has_male_garment:
-        return 'female'
-    if has_male_garment and not has_female_garment:
+    _, det_g, _ = ProductValidator.is_gender_compatible(product, 'female')
+    if det_g in ('female', 'kids'):
+        return det_g
+    _, det_m, _ = ProductValidator.is_gender_compatible(product, 'male')
+    if det_m == 'male':
         return 'male'
+    return det_g
 
-    # Priority 5: Unknown
-    return 'unknown'
 
 
 ProductValidator.detect_product_gender = staticmethod(detect_product_gender)
@@ -644,29 +749,31 @@ def log_shopping_query(query: str, returned: int, accepted: int, rejected: int):
 def log_shopping_filter(
     title: str,
     retailer: str,
-    live_price: Optional[float],
+    requested_gender: str,
     detected_gender: str,
+    requested_category: str,
     detected_category: str,
-    color: str = "N/A",
-    availability: str = "IN STOCK",
-    url: str = "N/A",
+    price: Optional[float],
+    requested_price_range: str,
     decision: str = "ACCEPT",
-    reason: str = "All filters matched"
+    reason: str = "All filters matched",
+    canonical_product_id: str = "N/A"
 ):
-    """Outputs standardized [SHOPPING FILTER] logging matching Section 27."""
-    price_str = f"INR {int(live_price):,}" if live_price is not None else "N/A"
+    """Outputs standardized [SHOPPING FILTER] logging matching Section 37."""
+    price_str = f"{int(price)}" if price is not None else "N/A"
     _safe_print(
-        f"\n[SHOPPING FILTER]\n"
+        f"\n[SHOPPING FILTER]\n\n"
         f"Title: {title}\n"
         f"Retailer: {retailer}\n"
+        f"Requested Gender: {requested_gender}\n"
+        f"Detected Gender: {detected_gender}\n"
+        f"Requested Category: {requested_category}\n"
+        f"Detected Category: {detected_category}\n"
         f"Price: {price_str}\n"
-        f"Gender: {detected_gender}\n"
-        f"Category: {detected_category}\n"
-        f"Color: {color}\n"
-        f"Availability: {availability}\n"
-        f"URL: {url}\n"
+        f"Requested Price Range: {requested_price_range}\n"
         f"Decision: {decision}\n"
-        f"Reason: {reason}"
+        f"Reason: {reason}\n"
+        f"Canonical Product ID: {canonical_product_id}"
     )
 
 
@@ -686,49 +793,68 @@ def log_filter_decision(
     reason: str = "All filters matched",
     color: str = "N/A",
     availability: str = "IN STOCK",
-    url: str = "N/A"
+    url: str = "N/A",
+    canonical_product_id: str = "N/A"
 ):
     """Backwards-compatible wrapper around log_shopping_filter."""
     log_shopping_filter(
         title=title,
         retailer=retailer,
-        live_price=live_price,
+        requested_gender=requested_gender,
         detected_gender=detected_gender,
+        requested_category=requested_category,
         detected_category=detected_category,
-        color=color,
-        availability=availability,
-        url=url,
+        price=live_price,
+        requested_price_range=selected_price_range,
         decision=decision,
-        reason=reason
+        reason=reason,
+        canonical_product_id=canonical_product_id
     )
 
 
 def log_shopping_summary(
-    api_requests: int,
+    requested_gender: str,
+    requested_category: str,
+    requested_occasion: str,
+    requested_season: str,
+    requested_price_range: str,
     candidates: int,
-    gender_accepted: int,
-    category_accepted: int,
-    price_accepted: int,
-    availability_accepted: int,
-    image_accepted: int,
-    url_accepted: int,
+    gender_rejected: int,
+    category_rejected: int,
+    kids_rejected: int,
+    image_rejected: int,
+    url_rejected: int,
+    price_rejected: int,
     duplicates_removed: int,
-    final_products: int
+    final_products: int,
+    retailers: Any,
+    processing_time: float = 0.0
 ):
-    """Outputs standardized [SHOPPING SUMMARY] logging matching Section 27."""
+    """Outputs standardized [SHOPPING SUMMARY] logging matching Section 38."""
+    if isinstance(retailers, (set, list)):
+        ret_str = ", ".join(sorted(list(retailers))) if retailers else "None"
+    else:
+        ret_str = str(retailers)
     _safe_print(
-        f"\n[SHOPPING SUMMARY]\n"
-        f"API Requests: {api_requests}\n"
-        f"Candidates: {candidates}\n"
-        f"Gender Accepted: {gender_accepted}\n"
-        f"Category Accepted: {category_accepted}\n"
-        f"Price Accepted: {price_accepted}\n"
-        f"Availability Accepted: {availability_accepted}\n"
-        f"Image Accepted: {image_accepted}\n"
-        f"URL Accepted: {url_accepted}\n"
+        f"\n[SHOPPING SUMMARY]\n\n"
+        f"Requested Gender: {requested_gender}\n"
+        f"Requested Category: {requested_category}\n"
+        f"Requested Occasion: {requested_occasion}\n"
+        f"Requested Season: {requested_season}\n"
+        f"Requested Price Range: {requested_price_range}\n\n"
+        f"SerpApi Candidates: {candidates}\n"
+        f"Gender Rejected: {gender_rejected}\n"
+        f"Category Rejected: {category_rejected}\n"
+        f"Kids Rejected: {kids_rejected}\n"
+        f"Image Rejected: {image_rejected}\n"
+        f"Invalid URL: {url_rejected}\n"
+        f"Invalid Price: {price_rejected}\n"
         f"Duplicates Removed: {duplicates_removed}\n"
-        f"Final Products: {final_products}"
+        f"Final Valid Products: {final_products}\n\n"
+        f"Retailers: {ret_str}\n"
+        f"Average Processing Time: {processing_time:.2f}s\n"
     )
+
 
 
 def log_shopping_inventory(
@@ -1418,90 +1544,88 @@ class SerpApiShoppingService:
         occasion: str,
         season: str,
         palette: List[str],
+        seen_canonical_ids: set,
         seen_urls: set,
-        seen_title_keys: set,
+        seen_title_brand_keys: set,
+        seen_title_price_keys: set,
+        seen_images: set,
         retailer_candidate_counts: dict,
-        stats: dict,
-        seen_product_ids: Optional[set] = None,
-        seen_images: Optional[set] = None
+        stats: dict
     ) -> List[dict]:
         """
         Filters and scores raw SerpApi items under strict gender, category, image, URL,
-        and price range constraints with structured logging.
+        and price range constraints with Section 37 structured logging.
         """
-        if seen_product_ids is None:
-            seen_product_ids = set()
-        if seen_images is None:
-            seen_images = set()
-
         accepted_candidates = []
 
         for it in raw_items:
             stats['candidates'] += 1
-            title = (it.get('title') or '').strip()
-            thumbnail = (it.get('thumbnail') or '').strip()
+            title = (it.get('title') or it.get('name') or '').strip()
+            thumbnail = (it.get('thumbnail') or it.get('image') or it.get('image_url') or '').strip()
             price = it.get('extracted_price')
-            raw_source = it.get('source') or 'Online Retailer'
+            raw_source = it.get('source') or it.get('store') or it.get('brand') or 'Online Store'
             pre_retailer = self.clean_retailer_name(raw_source)
             det_cat = ProductValidator.detect_category(title, it.get('snippet', ''), it.get('category', ''))
+            canonical_id = ProductValidator.extract_canonical_product_id(it, pre_retailer, it.get('link') or it.get('product_url') or '')
 
             # Basic field presence
             if not title or not thumbnail or price is None:
-                log_shopping_filter(title or 'Unknown', pre_retailer, price, "unknown", det_cat, decision="REJECT", reason="Missing title, thumbnail, or price")
+                stats['category_rejected'] += 1
+                log_shopping_filter(title or 'Unknown', pre_retailer, norm_gender, "unknown", target_category, det_cat, price, price_label, decision="REJECT", reason="Missing title, thumbnail, or price", canonical_product_id=canonical_id)
                 continue
 
             # Hard reject mock retailer
             if pre_retailer.lower() == 'aurafit official':
                 continue
 
-            # 1. Retailer filter
+            # 1. Retailer filter (Section 24)
             ret_ok, _ = validate_retailer(pre_retailer, req_ret)
             if not ret_ok:
-                log_shopping_filter(title, pre_retailer, price, "unknown", det_cat, decision="REJECT", reason=f"Retailer mismatch ({pre_retailer} != {req_ret})")
+                log_shopping_filter(title, pre_retailer, norm_gender, "unknown", target_category, det_cat, price, price_label, decision="REJECT", reason=f"Retailer mismatch ({pre_retailer} != {req_ret})", canonical_product_id=canonical_id)
                 continue
 
-            # 2. Strict authentic image validation
+            # 2. Strict authentic image validation (Section 12)
             img_ok, img_reason = ProductValidator.validate_image(thumbnail)
             if not img_ok:
-                log_shopping_filter(title, pre_retailer, price, "unknown", det_cat, decision="REJECT", reason=f"Invalid image: {img_reason}")
+                stats['image_rejected'] += 1
+                log_shopping_filter(title, pre_retailer, norm_gender, "unknown", target_category, det_cat, price, price_label, decision="REJECT", reason=f"Invalid image: {img_reason}", canonical_product_id=canonical_id)
                 continue
-            stats['image_accepted'] += 1
 
-            # 3. Strict gender validation
-            det_gender = detect_product_gender(it)
+            # 3. Strict gender validation (Section 4, 5, 6)
             gender_ok, det_gender, g_reason = ProductValidator.is_gender_compatible(
                 product=it,
                 target_gender=norm_gender,
                 target_category=target_category
             )
             if not gender_ok:
-                log_shopping_filter(title, pre_retailer, price, det_gender, det_cat, decision="REJECT", reason=g_reason)
+                if det_gender == 'kids':
+                    stats['kids_rejected'] += 1
+                else:
+                    stats['gender_rejected'] += 1
+                log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=g_reason, canonical_product_id=canonical_id)
                 continue
-            stats['gender_accepted'] += 1
 
-            # 4. Strict category validation (dresses for female, menswear for male)
+            # 4. Strict category validation (Section 7, 8, 9, 10, 11)
             cat_ok, c_reason = ProductValidator.validate_category(
-                title=title,
-                description=it.get('snippet', '') or it.get('description', ''),
-                category=it.get('category', ''),
+                title_or_product=it,
                 target_category=target_category,
                 target_gender=norm_gender
             )
             if not cat_ok:
-                log_shopping_filter(title, pre_retailer, price, det_gender, det_cat, decision="REJECT", reason=c_reason)
+                stats['category_rejected'] += 1
+                log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=c_reason, canonical_product_id=canonical_id)
                 continue
-            stats['category_accepted'] += 1
 
-            # 5. Price Range Validation
+            # 5. Price Range Validation (Section 22)
             live_price = float(price)
-            price_ok, _ = validate_price(live_price, min_p, max_p)
+            price_ok, p_reason = ProductValidator.validate_price(live_price, min_p, max_p)
             if not price_ok:
-                log_shopping_filter(title, pre_retailer, live_price, det_gender, det_cat, decision="REJECT", reason=f"Price ₹{live_price} not in {price_label}")
+                stats['price_rejected'] += 1
+                log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason=f"Price INR {int(live_price)} not in requested range ({price_label})", canonical_product_id=canonical_id)
                 continue
-            stats['price_accepted'] += 1
 
-            # 6. Fast direct URL extraction (0ms first check)
-            cand = self.unwrap_and_clean_url(it.get('link') or it.get('product_link'))
+            # 6. Fast direct URL extraction (Section 23)
+            cand = self.unwrap_and_clean_url(it.get('link') or it.get('product_link') or it.get('product_url'))
             direct_url = None
             resolved_source = raw_source
             original_price = it.get('extracted_old_price') or it.get('extracted_original_price')
@@ -1520,11 +1644,10 @@ class SerpApiShoppingService:
                         original_price = float(store_offer['original_price'])
 
             if not direct_url or not self.is_valid_direct_url(direct_url):
-                log_shopping_filter(title, pre_retailer, live_price, det_gender, det_cat, decision="REJECT", reason="No valid direct retailer URL")
+                stats['url_rejected'] += 1
+                log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="No valid direct retailer URL", canonical_product_id=canonical_id)
                 continue
-            stats['url_accepted'] += 1
 
-            # Re-normalize retailer after resolving direct source
             final_retailer = self.clean_retailer_name(resolved_source)
             if final_retailer.lower() == 'aurafit official':
                 continue
@@ -1533,54 +1656,59 @@ class SerpApiShoppingService:
             if not ret_ok2:
                 continue
 
-            # Deduplication: direct canonical URL
+            # Re-extract canonical product ID with resolved retailer and direct URL
+            canonical_id = ProductValidator.extract_canonical_product_id(it, final_retailer, direct_url)
+
+            # Deduplication Level 1: Canonical Product ID (Section 13 & 14)
+            if canonical_id in seen_canonical_ids:
+                stats['duplicates_removed'] += 1
+                log_shopping_filter(title, final_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="Duplicate canonical product ID", canonical_product_id=canonical_id)
+                continue
+
+            # Deduplication Level 2: Normalized Direct Product URL (Section 14 & 15)
             canon_url = self.canonicalize_url(direct_url)
             if canon_url in seen_urls:
                 stats['duplicates_removed'] += 1
+                log_shopping_filter(title, final_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="Duplicate canonical direct product URL", canonical_product_id=canonical_id)
                 continue
-            seen_urls.add(canon_url)
 
-            # Deduplication: Authentic Image URL (prevent duplicate images on cards)
-            img_to_check = thumbnail or it.get('image') or it.get('image_url')
-            if img_to_check and seen_images is not None:
-                tbn_match = re.search(r'q=tbn:([^&]+)', img_to_check)
-                img_key = tbn_match.group(1) if tbn_match else img_to_check.split('?')[0].strip()
-                if img_key in seen_images:
-                    stats['duplicates_removed'] += 1
-                    continue
-                seen_images.add(img_key)
-
-            # Deduplication: Product ID
-            prod_id = str(it.get('product_id') or it.get('id') or '').strip()
-            if prod_id and prod_id in seen_product_ids:
+            # Deduplication Level 3: Retailer + Normalized Title + Brand (Section 14 & 16)
+            norm_title = ProductValidator.normalize_title(title)
+            brand_val = (it.get('brand') or final_retailer or '').strip().lower()
+            l3_key = f"{final_retailer.lower()}_{norm_title}_{brand_val}"
+            if l3_key in seen_title_brand_keys:
                 stats['duplicates_removed'] += 1
+                log_shopping_filter(title, final_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="Duplicate normalized title and brand for retailer", canonical_product_id=canonical_id)
                 continue
-            if prod_id:
-                seen_product_ids.add(prod_id)
 
-            # Deduplication: Title key across sizes/SKUs (without discarding distinct dresses from same brand)
-            norm_title = re.sub(r'[^a-z0-9]', ' ', title.lower())
-            noise_tokens = {
-                'women', 'womens', 'ladies', 'woman', 'girl', 'girls', 'female',
-                'dress', 'dresses', 'printed', 'solid', 'color', 'size',
-                'xs', 's', 'm', 'l', 'xl', 'xxl', 'xxxl', 'small', 'medium', 'large',
-                'cotton', 'polyester', 'western', 'casual', 'party', 'for', 'and', 'with', 'the',
-                'men', 'mens', 'shirt', 'shirts', 'male', 'boy', 'boys'
-            }
-            meaningful_tokens = [w for w in norm_title.split() if w not in noise_tokens]
-            title_slug = f"{final_retailer.lower()}_" + "_".join(meaningful_tokens[:4])
-            if len(meaningful_tokens) >= 2:
-                if title_slug in seen_title_keys:
-                    stats['duplicates_removed'] += 1
-                    continue
-                seen_title_keys.add(title_slug)
+            # Deduplication Level 4: Normalized Title + Price + Retailer (Section 14 & 17)
+            l4_key = f"{final_retailer.lower()}_{norm_title}_{int(live_price)}"
+            if l4_key in seen_title_price_keys:
+                stats['duplicates_removed'] += 1
+                log_shopping_filter(title, final_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="Duplicate normalized title, price and retailer", canonical_product_id=canonical_id)
+                continue
+
+            # Deduplication Level 5: Image Fingerprint (Section 14)
+            tbn_match = re.search(r'q=tbn:([^&]+)', thumbnail)
+            img_key = tbn_match.group(1) if tbn_match else thumbnail.split('?')[0].strip()
+            if img_key in seen_images:
+                stats['duplicates_removed'] += 1
+                log_shopping_filter(title, final_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="Duplicate image fingerprint", canonical_product_id=canonical_id)
+                continue
 
             # Availability
             availability = self.parse_availability(it.get('details_and_offers', []), it.get('delivery'))
             if availability == "OUT OF STOCK":
-                log_shopping_filter(title, final_retailer, live_price, det_gender, det_cat, availability=availability, decision="REJECT", reason="Product is out of stock")
+                log_shopping_filter(title, final_retailer, norm_gender, det_gender, target_category, det_cat, live_price, price_label, decision="REJECT", reason="Product is out of stock", canonical_product_id=canonical_id)
                 continue
-            stats['availability_accepted'] += 1
+
+            # Register in all 5 deduplication sets
+            seen_canonical_ids.add(canonical_id)
+            seen_urls.add(canon_url)
+            seen_title_brand_keys.add(l3_key)
+            seen_title_price_keys.add(l4_key)
+            seen_images.add(img_key)
+            stats['retailers'].add(final_retailer)
 
             # Discount calculation
             discount_str = None
@@ -1611,7 +1739,8 @@ class SerpApiShoppingService:
             candidate_item = {
                 'it': it,
                 'title': title,
-                'title_key': title_slug,
+                'canonical_product_id': canonical_id,
+                'canonical_url': canon_url,
                 'thumbnail': thumbnail,
                 'retailer_name': final_retailer,
                 'brand': it.get('brand') or final_retailer,
@@ -1629,14 +1758,15 @@ class SerpApiShoppingService:
             log_shopping_filter(
                 title=title,
                 retailer=final_retailer,
-                live_price=live_price,
+                requested_gender=norm_gender,
                 detected_gender=det_gender,
+                requested_category=target_category,
                 detected_category=det_cat,
-                color=detected_colors[0],
-                availability=availability,
-                url=direct_url,
+                price=live_price,
+                requested_price_range=price_label,
                 decision="ACCEPT",
-                reason=f"All filters matched (ranking score: {score})"
+                reason=f"All filters matched (ranking score: {score})",
+                canonical_product_id=canonical_id
             )
 
         return accepted_candidates
@@ -1665,6 +1795,9 @@ class SerpApiShoppingService:
         real price range filtering, and retailer diversity.
         Returns immutable standardized dicts backed by database records.
         """
+        import time
+        start_time = time.time()
+
         if not self.is_configured():
             print("[ShoppingService] SERPAPI_KEY is not configured")
             return []
@@ -1696,8 +1829,8 @@ class SerpApiShoppingService:
             target=target_limit
         )
 
-        # Check Cache
-        cache_key = f"{norm_gender}_{skin_tone}_{occasion}_{season}_{min_p}_{max_p}_{req_ret or 'all'}_{target_limit}"
+        # Check Cache with full dimension key (Section 42)
+        cache_key = f"{norm_gender}:{target_category}:{occasion}:{season}:{skin_tone}:{price_label}:{req_ret or 'all'}:{target_limit}"
         cached = _shopping_cache.get(cache_key)
         if cached:
             print(f"[ShoppingService] Returning {len(cached)} live products from cache ({cache_key})")
@@ -1717,19 +1850,21 @@ class SerpApiShoppingService:
 
         stats = {
             'candidates': 0,
-            'gender_accepted': 0,
-            'category_accepted': 0,
-            'price_accepted': 0,
-            'availability_accepted': 0,
-            'image_accepted': 0,
-            'url_accepted': 0,
+            'gender_rejected': 0,
+            'category_rejected': 0,
+            'kids_rejected': 0,
+            'image_rejected': 0,
+            'url_rejected': 0,
+            'price_rejected': 0,
             'duplicates_removed': 0,
-            'final_products': 0
+            'final_products': 0,
+            'retailers': set()
         }
 
+        seen_canonical_ids = set()
         seen_urls = set()
-        seen_title_keys = set()
-        seen_product_ids = set()
+        seen_title_brand_keys = set()
+        seen_title_price_keys = set()
         seen_images = set()
         retailer_candidate_counts = {}
         all_candidates = []
@@ -1771,12 +1906,13 @@ class SerpApiShoppingService:
                             occasion=occasion,
                             season=season,
                             palette=palette,
+                            seen_canonical_ids=seen_canonical_ids,
                             seen_urls=seen_urls,
-                            seen_title_keys=seen_title_keys,
+                            seen_title_brand_keys=seen_title_brand_keys,
+                            seen_title_price_keys=seen_title_price_keys,
+                            seen_images=seen_images,
                             retailer_candidate_counts=retailer_candidate_counts,
-                            stats=stats,
-                            seen_product_ids=seen_product_ids,
-                            seen_images=seen_images
+                            stats=stats
                         )
                         all_candidates.extend(candidates_from_query)
 
@@ -1795,8 +1931,8 @@ class SerpApiShoppingService:
         else:
             print("[ShoppingService] SerpApi quota circuit breaker active. Bypassing external calls and using authentic live SerpApi database catalog directly.")
 
-        # Resilient live catalog: if candidates are below target_limit (e.g. quota exhausted or sparse live results),
-        # supplement from authentic live SerpApi products previously fetched and persisted in the database.
+        # Resilient live catalog: if candidates are below target_limit,
+        # supplement from authentic live SerpApi products previously persisted in the database.
         # Strict validation (gender, category, price range, retailer, image, direct URL, dedup) is STILL enforced identically!
         if len(all_candidates) < target_limit:
             print(f"[ShoppingService] Live queries yielded {len(all_candidates)}/{target_limit}. Supplementing from persisted live SerpApi items under identical strict filters...")
@@ -1834,16 +1970,17 @@ class SerpApiShoppingService:
                     occasion=occasion,
                     season=season,
                     palette=palette,
+                    seen_canonical_ids=seen_canonical_ids,
                     seen_urls=seen_urls,
-                    seen_title_keys=seen_title_keys,
+                    seen_title_brand_keys=seen_title_brand_keys,
+                    seen_title_price_keys=seen_title_price_keys,
+                    seen_images=seen_images,
                     retailer_candidate_counts=retailer_candidate_counts,
-                    stats=stats,
-                    seen_product_ids=seen_product_ids,
-                    seen_images=seen_images
+                    stats=stats
                 )
                 all_candidates.extend(db_candidates)
 
-        # Multi-retailer diversification (Section 18) & ranking
+        # Multi-retailer diversification & ranking
         all_candidates.sort(key=lambda x: x['ranking_score'], reverse=True)
 
         selected_candidates = []
@@ -1869,7 +2006,7 @@ class SerpApiShoppingService:
                 if len(selected_candidates) >= target_limit:
                     break
 
-        # Persist selected candidates and build standardized response (Section 23 & 32)
+        # Persist selected candidates and build standardized response (Section 21)
         live_products = []
         for c in selected_candidates:
             it = c['it']
@@ -1913,6 +2050,8 @@ class SerpApiShoppingService:
                 p_dict = outfit_record.to_dict()
                 p_dict['title'] = outfit_record.name
                 p_dict['availability'] = availability
+                p_dict['canonical_product_id'] = c.get('canonical_product_id', ext_id)
+                p_dict['canonical_url'] = c.get('canonical_url', direct_url)
                 p_dict['shopping_links'] = { retailer_name.lower().replace(' ', ''): direct_url }
                 p_dict['match_score'] = round(c['ranking_score'] / 100.0, 2)
                 live_products.append(p_dict)
@@ -1924,43 +2063,33 @@ class SerpApiShoppingService:
             db.session.rollback()
             print(f"[ShoppingService] Batch DB commit error: {e}")
 
-        # Structured Log: Shopping Summary (Section 27)
-        stats['final_products'] = len(live_products)
-        log_shopping_summary(
-            api_requests=executed_queries_count,
-            candidates=stats['candidates'],
-            gender_accepted=stats['gender_accepted'],
-            category_accepted=stats['category_accepted'],
-            price_accepted=stats['price_accepted'],
-            availability_accepted=stats['availability_accepted'],
-            image_accepted=stats['image_accepted'],
-            url_accepted=stats['url_accepted'],
-            duplicates_removed=stats['duplicates_removed'],
-            final_products=stats['final_products']
-        )
+        elapsed_time = time.time() - start_time
 
-        # Structured Log: Shopping Inventory Diagnostics (Section 23)
-        log_shopping_inventory(
-            gender=norm_gender,
-            skin_tone=skin_tone or 'medium',
-            occasion=occasion,
-            season=season,
-            price_range=price_label,
-            requested=target_limit,
+        # Structured Log: Shopping Summary (Section 38)
+        log_shopping_summary(
+            requested_gender=norm_gender,
+            requested_category=target_category,
+            requested_occasion=occasion,
+            requested_season=season,
+            requested_price_range=price_label,
             candidates=stats['candidates'],
-            gender_valid=stats['gender_accepted'],
-            dress_valid=stats['category_accepted'],
-            image_valid=stats['image_accepted'],
-            price_valid=stats['price_accepted'],
-            direct_url_valid=stats['url_accepted'],
-            after_dedup=len(all_candidates),
-            final_result=len(live_products)
+            gender_rejected=stats['gender_rejected'],
+            category_rejected=stats['category_rejected'],
+            kids_rejected=stats['kids_rejected'],
+            image_rejected=stats['image_rejected'],
+            url_rejected=stats['url_rejected'],
+            price_rejected=stats['price_rejected'],
+            duplicates_removed=stats['duplicates_removed'],
+            final_products=len(live_products),
+            retailers=stats['retailers'],
+            processing_time=elapsed_time
         )
 
         if live_products:
             _shopping_cache.set(cache_key, live_products)
 
         return live_products
+
 
     # ------------------------------------------------------------------
     # Similar Recommendations Query (Sections 25 & 9)
