@@ -167,6 +167,9 @@ class RecommendationEngine:
                 price_range=price_range,
                 retailer=retailer
             )
+            self.last_stats = getattr(shopping_service, 'last_stats', {})
+            from services.product_contract import format_recommendation_contract
+
             if live_products:
                 scored = []
                 for p in live_products:
@@ -178,33 +181,52 @@ class RecommendationEngine:
                         overall = self._calculate_overall_score(scores)
                         p['match_score'] = overall
                         p['shopping_links'] = self._generate_shopping_links(outfit_rec, viewer_gender)
-                        scored.append({
-                            'outfit': p,
-                            'scores': scores,
-                            'overall_score': overall
-                        })
+                        contract_item = format_recommendation_contract(
+                            item=p,
+                            fallback_gender=norm_gender,
+                            fallback_category=target_category,
+                            fallback_occasion=occasion,
+                            fallback_season=season,
+                            scores=scores,
+                            overall_score=overall
+                        )
+                        scored.append(contract_item)
                 scored.sort(key=lambda x: x['overall_score'], reverse=True)
                 top = scored[:limit]
 
                 # Instant similar live recommendations:
                 # Ensure similar recommendations NEVER duplicate any product or image from top recommendations
-                top_images = {s['outfit'].get('image_url') for s in top if s.get('outfit', {}).get('image_url')}
-                top_urls = {s['outfit'].get('product_url') for s in top if s.get('outfit', {}).get('product_url')}
+                top_images = {s.get('image_url') for s in top if s.get('image_url')}
+                top_urls = {s.get('product_url') for s in top if s.get('product_url')}
 
                 remaining_candidates = [
-                    s['outfit'] for s in scored[limit:]
-                    if s['outfit'].get('image_url') not in top_images and s['outfit'].get('product_url') not in top_urls
+                    s for s in scored[limit:]
+                    if s.get('image_url') not in top_images and s.get('product_url') not in top_urls
                 ]
 
                 if len(remaining_candidates) >= 4:
-                    self.last_similar_recommendations = remaining_candidates[:4]
+                    self.last_similar_recommendations = [
+                        format_recommendation_contract(
+                            item=s,
+                            fallback_gender=norm_gender,
+                            fallback_category=target_category,
+                            fallback_occasion=occasion,
+                            fallback_season=season
+                        ) for s in remaining_candidates[:4]
+                    ]
                 elif top:
                     fetched_sim = shopping_service.fetch_similar_live_products(
-                        top[0]['outfit'], profile, limit=6,
+                        top[0], profile, limit=6,
                         min_price=min_price, max_price=max_price, price_range=price_range, retailer=retailer
                     )
                     self.last_similar_recommendations = [
-                        sim for sim in fetched_sim
+                        format_recommendation_contract(
+                            item=sim,
+                            fallback_gender=norm_gender,
+                            fallback_category=target_category,
+                            fallback_occasion=occasion,
+                            fallback_season=season
+                        ) for sim in fetched_sim
                         if sim.get('image_url') not in top_images and sim.get('product_url') not in top_urls
                     ][:4]
                 else:
@@ -239,6 +261,7 @@ class RecommendationEngine:
             outfits = self._filter_by_skin_tone(outfits, skin_tone)
 
         # Step 4 – Score every outfit
+        from services.product_contract import format_recommendation_contract
         scored = []
         for outfit in outfits:
             scores = self._calculate_scores(
@@ -247,22 +270,22 @@ class RecommendationEngine:
             overall = self._calculate_overall_score(scores)
             outfit_dict = outfit.to_dict()
             outfit_dict['shopping_links'] = self._generate_shopping_links(outfit, viewer_gender)
-            outfit_dict['match_score'] = overall
-            if outfit_dict.get('exact_product_link_available'):
-                outfit_dict['shopping_url'] = outfit.product_url
-            else:
-                outfit_dict['shopping_url'] = None
-            scored.append({
-                'outfit':        outfit_dict,
-                'scores':        scores,
-                'overall_score': overall,
-            })
+            contract_item = format_recommendation_contract(
+                item=outfit_dict,
+                fallback_gender=norm_gender,
+                fallback_category=target_category,
+                fallback_occasion=occasion,
+                fallback_season=season,
+                scores=scores,
+                overall_score=overall
+            )
+            scored.append(contract_item)
 
         # Step 5 – Rank by overall score
         scored.sort(key=lambda x: x['overall_score'], reverse=True)
         available_scored = [
             s for s in scored
-            if s['outfit'].get('exact_product_link_available') and s['outfit'].get('in_stock')
+            if s.get('exact_product_link_available') and s.get('in_stock')
         ]
         top = available_scored[:limit] if available_scored else scored[:limit]
         self.last_similar_recommendations = []

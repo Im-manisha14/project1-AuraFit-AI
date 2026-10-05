@@ -7,6 +7,13 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from extensions import db
+from services.occasion_classifier import (
+    OccasionClassifier,
+    SeasonClassifier,
+    get_occasion_search_queries,
+    normalize_occasion as classify_normalize_occasion,
+    get_occasion_db_value,
+)
 from models.outfit import Outfit
 
 # Re-export modular retailer architecture components for backwards compatibility
@@ -1270,12 +1277,10 @@ class SerpApiShoppingService:
         retailer: Optional[str] = None
     ) -> List[List[str]]:
         """
-        Controlled Multi-Pass Search Expansion (Sections 3, 5, 6, 7, 8, 17).
-        Generates structured search passes to gather live inventory up to the target.
+        Controlled Multi-Pass Search Expansion using OccasionClassifier query families.
+        For female dress requests, uses precision occasion-specific queries so that
+        party searches yield party/cocktail/sequin products (not casual/office ones).
         """
-        occ_term = OCCASION_SEARCH_MAP.get((occasion or '').lower(), (occasion or '').lower())
-        if occ_term == 'all':
-            occ_term = ''
         season_term = (season or '').lower()
         if season_term in ('all', ''):
             season_term = ''
@@ -1284,70 +1289,81 @@ class SerpApiShoppingService:
         passes = []
 
         if norm_gender == 'female':
-            # PASS 1: Base gender + occasion + season (with price cue)
-            p1 = [
-                f"women {occ_term} dress {season_term} {p_cue}".strip(),
-                f"women {occ_term} dress {p_cue}".strip()
-            ]
-            passes.append([q for q in p1 if q])
+            # PASS 1+2: Occasion-specific precision queries from OccasionClassifier families
+            # These are the PRIMARY source of inventory — each query is occasion-targeted.
+            occasion_queries = get_occasion_search_queries(
+                requested_occasion=occasion,
+                season=season_term,
+                colors=palette[:3] if palette else [],
+                retailer=retailer,
+                price_cue=p_cue,
+                max_queries=12
+            )
+            # Split into two passes for progressive loading
+            mid = max(2, len(occasion_queries) // 2)
+            passes.append([q for q in occasion_queries[:mid] if q])
+            passes.append([q for q in occasion_queries[mid:] if q])
 
-            # PASS 2: Skin-tone colors (individual queries matching skin tone palette)
-            p2 = [f"women {col} {occ_term} dress {season_term} {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[:4]]
-            passes.append([q for q in p2 if q])
-
-            # PASS 3: Dress styles (midi, maxi, wrap, fit and flare, a line, bodycon)
-            styles = ['midi dress', 'maxi dress', 'wrap dress', 'a line dress', 'fit and flare dress', 'bodycon dress']
-            p3 = [f"women {st} {occ_term} {season_term} {p_cue}".strip() for st in styles[:4]]
+            # PASS 3: Skin-tone color + occasion combos
+            norm_occ_key = classify_normalize_occasion(occasion)
+            p3 = []
+            for col in (palette or DEFAULT_SKIN_PALETTE)[:4]:
+                q = f"women {col} {norm_occ_key} dress"
+                if season_term:
+                    q += f" {season_term}"
+                if p_cue:
+                    q += f" {p_cue}"
+                p3.append(q.strip())
             passes.append([q for q in p3 if q])
 
-            # PASS 4: Occasion synonyms
-            occ_syns = {
-                'party': ['cocktail dress', 'evening dress', 'party wear dress', 'occasion dress'],
-                'casual': ['day dress', 'summer dress', 'everyday dress', 'casual midi dress'],
-                'date': ['date night dress', 'cocktail dress', 'evening dress'],
-                'work': ['formal dress', 'office dress', 'work dress', 'shirt dress'],
-                'formal': ['formal gown', 'sheath dress', 'evening gown', 'formal dress'],
-            }.get((occasion or '').lower(), ['party dress', 'cocktail dress'])
-            p4 = [f"women {syn} {season_term} {p_cue}".strip() for syn in occ_syns[:3]]
-            passes.append([q for q in p4 if q])
-
-            # PASS 5: Season synonyms
+            # PASS 4: Season-specific synonyms for the occasion
             seas_syns = {
-                'spring': ['spring dress', 'floral dress', 'pastel dress', 'lightweight dress'],
-                'summer': ['summer dress', 'cotton dress', 'linen dress', 'sundress'],
-                'autumn': ['autumn dress', 'fall dress', 'midi dress', 'long sleeve dress'],
-                'winter': ['winter dress', 'knit dress', 'sweater dress', 'velvet dress'],
-            }.get(season_term, ['summer dress', 'floral dress'])
-            p5 = [f"women {syn} {occ_term} {p_cue}".strip() for syn in seas_syns[:3]]
+                'spring': ['spring floral dress', 'pastel dress', 'light cotton dress', 'floral midi dress'],
+                'summer': ['summer cotton dress', 'linen dress', 'sundress', 'summer maxi dress'],
+                'autumn': ['autumn midi dress', 'long sleeve dress', 'fall wrap dress', 'earthy tone dress'],
+                'winter': ['winter knit dress', 'sweater dress', 'velvet dress', 'warm midi dress'],
+            }.get(season_term, [])
+            if seas_syns:
+                p4 = [f"women {syn} {norm_occ_key} {p_cue}".strip() for syn in seas_syns[:3]]
+                passes.append([q for q in p4 if q])
+
+            # PASS 5: Retailer-targeted occasion queries
+            if retailer:
+                p5 = [
+                    f"{retailer} women {norm_occ_key} dress {p_cue}".strip(),
+                    f"{retailer} women dress {p_cue}".strip()
+                ]
+            else:
+                p5 = [
+                    f"women {norm_occ_key} dress myntra {p_cue}".strip(),
+                    f"women {norm_occ_key} dress amazon india {p_cue}".strip(),
+                    f"women {norm_occ_key} dress ajio {p_cue}".strip(),
+                    f"women {norm_occ_key} dress tatacliq {p_cue}".strip(),
+                ]
             passes.append([q for q in p5 if q])
 
-            # PASS 6: Additional colors from skin-tone palette
+            # PASS 6: Additional colors from skin-tone palette (broader fallback)
             p6 = [f"women {col} dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
             passes.append([q for q in p6 if q])
 
-            # PASS 7: Retailer-specific queries
-            if retailer:
-                p7 = [f"{retailer} women {occ_term} dress {p_cue}".strip(), f"{retailer} women dress {p_cue}".strip()]
-            else:
-                p7 = [f"women {occ_term} dress {ret} {p_cue}".strip() for ret in ['myntra', 'amazon', 'ajio', 'tatacliq', 'savana', 'newme']]
+            # PASS 7: Traditional/ethnic fallback (always valid for dresses)
+            p7 = [
+                f"women ethnic anarkali dress {norm_occ_key} {p_cue}".strip(),
+                f"women kurti dress {norm_occ_key} {p_cue}".strip()
+            ]
             passes.append([q for q in p7 if q])
 
-            # PASS 8: Alternative combinations
+            # PASS 8: Broad dress fallback (last resort)
             p8 = [
-                f"women {season_term} {occ_term} gown {p_cue}".strip(),
-                f"women ethnic anarkali dress {p_cue}".strip(),
-                f"women kurti dress {p_cue}".strip()
-            ]
-            passes.append([q for q in p8 if q])
-
-            # PASS 9: Broader but valid dress queries
-            p9 = [
                 f"women dress online india {p_cue}".strip(),
                 f"women stylish dress {p_cue}".strip()
             ]
-            passes.append([q for q in p9 if q])
+            passes.append([q for q in p8 if q])
 
-        else: # Male
+        else:  # Male
+            occ_term = OCCASION_SEARCH_MAP.get((occasion or '').lower(), (occasion or '').lower())
+            if occ_term == 'all':
+                occ_term = ''
             p1 = [f"men {occ_term} casual shirt {season_term} {p_cue}".strip()]
             passes.append(p1)
 
@@ -1502,15 +1518,25 @@ class SerpApiShoppingService:
         occ_low = (occasion or '').lower()
         seas_low = (season or '').lower()
 
-        # Occasion relevance: +25
-        if occ_low and occ_low != 'all' and occ_low in t_low:
-            score += 25.0
+        # Occasion relevance: +35 if match, -25 if conflicting
+        if occ_low and occ_low != 'all':
+            occ_res = OccasionClassifier.classify({'title': title}, occ_low, debug=False)
+            if occ_res.decision == 'ACCEPT':
+                score += 35.0 * max(0.5, occ_res.confidence)
+            elif occ_res.decision == 'SECONDARY':
+                score += 15.0 * max(0.3, occ_res.confidence)
+            else:
+                score -= 25.0
         else:
             score += 10.0
 
         # Season relevance: +20
-        if seas_low and seas_low != 'all' and seas_low in t_low:
-            score += 20.0
+        if seas_low and seas_low != 'all':
+            seas_res = SeasonClassifier.classify({'title': title}, seas_low, debug=False)
+            if seas_res.decision == 'ACCEPT':
+                score += 20.0 * max(0.5, seas_res.confidence)
+            else:
+                score -= 15.0
         else:
             score += 10.0
 
@@ -1623,6 +1649,23 @@ class SerpApiShoppingService:
                 stats['category_rejected'] += 1
                 log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=c_reason, canonical_product_id=canonical_id)
                 continue
+
+            # 4b. Occasion classification (post-retrieval validation)
+            # Only apply if occasion is specific (not 'all') and product is a dress (female)
+            if occasion and occasion.lower() not in ('all', '') and norm_gender == 'female':
+                occ_result = OccasionClassifier.classify(it, occasion, debug=False)
+                if occ_result.decision == 'REJECT':
+                    stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
+                    log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: {occ_result.reason}", canonical_product_id=canonical_id)
+                    continue
+
+            # 4c. Season classification (post-retrieval validation)
+            if season and season.lower() not in ('all', ''):
+                seas_result = SeasonClassifier.classify(it, season, debug=False)
+                if seas_result.decision == 'REJECT':
+                    stats['season_rejected'] = stats.get('season_rejected', 0) + 1
+                    log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Season mismatch: {seas_result.reason}", canonical_product_id=canonical_id)
+                    continue
 
             # 5. Price Range Validation (Section 22)
             live_price = float(price)
@@ -1860,6 +1903,8 @@ class SerpApiShoppingService:
             'candidates': 0,
             'gender_rejected': 0,
             'category_rejected': 0,
+            'occasion_rejected': 0,
+            'season_rejected': 0,
             'kids_rejected': 0,
             'image_rejected': 0,
             'url_rejected': 0,
@@ -2047,7 +2092,7 @@ class SerpApiShoppingService:
                 product_url=direct_url,
                 gender=c.get('det_gender') if c.get('det_gender') in ('female', 'male', 'unisex') else norm_gender,
                 category=target_category,
-                occasion=OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
+                occasion=OccasionClassifier.detect_primary_occasion({'title': title}) or OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
                 season=season if season != 'all' else 'all',
                 colors=c['colors'],
                 additional_images=extra_imgs,
@@ -2093,6 +2138,7 @@ class SerpApiShoppingService:
             processing_time=elapsed_time
         )
 
+        self.last_stats = dict(stats)
         if live_products:
             _shopping_cache.set(cache_key, live_products)
 

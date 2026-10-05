@@ -105,6 +105,7 @@ def get_outfits():
 @jwt_required()
 def get_outfit(outfit_id):
     from models.outfit import Outfit
+    from services.product_contract import format_recommendation_contract
     from extensions import db
     
     try:
@@ -123,8 +124,19 @@ def get_outfit(outfit_id):
         else:
             outfit_dict['shopping_links'] = {}
             outfit_dict['shopping_url'] = None
+
+        contract_outfit = format_recommendation_contract(
+            item=outfit_dict,
+            fallback_gender=outfit.gender or 'female',
+            fallback_category=outfit.category or 'dress',
+            fallback_occasion=outfit.occasion or 'casual',
+            fallback_season=outfit.season or 'all_season'
+        )
         
-        return jsonify({'outfit': outfit_dict}), 200
+        return jsonify({
+            'outfit': contract_outfit,
+            **contract_outfit
+        }), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

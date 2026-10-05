@@ -184,7 +184,16 @@ const Recommendations = () => {
     setCollectionsLoading(true);
     try {
       const res = await recommendationAPI.getCollections({ season: 'all', limit: 8 });
-      setCollections(res.data || {});
+      const colData = res.data || {};
+      if (colData.collections) {
+        const normCols = {};
+        Object.entries(colData.collections).forEach(([k, v]) => {
+          normCols[k] = Array.isArray(v) ? v : (v.items || []);
+        });
+        setCollections(normCols);
+      } else {
+        setCollections(colData);
+      }
     } catch (err) {
       console.error('Error loading collections:', err);
     } finally {
