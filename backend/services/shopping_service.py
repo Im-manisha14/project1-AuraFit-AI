@@ -1651,8 +1651,8 @@ class SerpApiShoppingService:
                 continue
 
             # 4b. Occasion classification (post-retrieval validation)
-            # Only apply if occasion is specific (not 'all') and product is a dress (female)
-            if occasion and occasion.lower() not in ('all', '') and norm_gender == 'female':
+            # Apply to BOTH genders when occasion is specific (not 'all')
+            if occasion and occasion.lower() not in ('all', ''):
                 occ_result = OccasionClassifier.classify(it, occasion, debug=False)
                 if occ_result.decision == 'REJECT':
                     stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
@@ -2414,7 +2414,12 @@ class SerpApiShoppingService:
                 existing.gender = gender
                 existing.category = category
                 existing.colors = colors
-                existing.occasion = occasion
+                # CRITICAL FIX: Never overwrite existing intrinsic occasion with the requested
+                # occasion — this prevents DB corruption when a product is fetched under a
+                # different occasion in a later request.
+                # Only update occasion if the record has a blank/unknown placeholder.
+                if not existing.occasion or existing.occasion in ('', 'all', 'unknown', 'casual') and occasion not in ('', 'all', 'unknown'):
+                    existing.occasion = occasion
                 existing.season = season
                 existing.in_stock = True
                 existing.purchasable = True

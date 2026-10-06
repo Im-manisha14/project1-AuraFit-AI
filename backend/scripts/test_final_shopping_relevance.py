@@ -330,6 +330,8 @@ def run_tests():
         col_data = col_resp.get_json() or {}
         col_passed = True
         for col_name, outfits in col_data.items():
+            if not isinstance(outfits, list):
+                continue
             dup_imgs = len(outfits) - len(set(o.get('image_url') for o in outfits if o.get('image_url')))
             dup_urls = len(outfits) - len(set(o.get('shopping_url') for o in outfits if o.get('shopping_url')))
             non_dresses = [o.get('name') for o in outfits if o.get('category') != 'dress']

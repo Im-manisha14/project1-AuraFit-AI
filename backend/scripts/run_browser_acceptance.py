@@ -1,5 +1,6 @@
 import time
 import os
+import sys
 import site
 import importlib
 
@@ -13,7 +14,7 @@ try:
 except Exception as _e:
     raise ImportError(f"Playwright is required to run browser acceptance tests: {_e}")
 
-artifact_dir = r"C:\Users\DELL\.gemini\antigravity-ide\brain\fb4b9c76-20d7-4ec5-bd27-696b27ad2ea6"
+artifact_dir = r"C:\Users\DELL\.gemini\antigravity-ide\brain\417f3524-17e9-47a3-b154-590304b2580d"
 os.makedirs(artifact_dir, exist_ok=True)
 
 print("=" * 80, flush=True)
@@ -43,24 +44,31 @@ with sync_playwright() as p:
 
     observed_results = {}
 
-    def test_occasion(occasion_val, screenshot_name):
-        print(f"\n--- Testing Occasion: {occasion_val.upper()} ---", flush=True)
+    def test_occasion(occasion_val, screenshot_name, target_gender="female"):
+        print(f"\n--- Testing Occasion: {occasion_val.upper()} ({target_gender.upper()}) ---", flush=True)
         # Find occasion select
         occ_select = page.locator('select[name="occasion"]')
         if occ_select.count() > 0:
             occ_select.select_option(occasion_val)
+            page.wait_for_timeout(500)
         
         # Season select
         season_select = page.locator('select[name="season"]')
         if season_select.count() > 0:
             season_select.select_option("summer")
+            page.wait_for_timeout(500)
 
         # Click Generate button
         gen_btn = page.locator('button:has-text("Generate Recommendations"), button:has-text("Generate")')
         if gen_btn.count() > 0:
             print(f"Clicking Generate button for {occasion_val}...", flush=True)
             gen_btn.first.click()
-            page.wait_for_timeout(5000)
+            try:
+                page.wait_for_selector('.recommendation-card', timeout=20000)
+                page.wait_for_timeout(1500)
+            except Exception as e:
+                print(f"Wait warning for cards on {occasion_val}: {e}", flush=True)
+                page.wait_for_timeout(3000)
         
         shot_path = os.path.join(artifact_dir, f"{screenshot_name}.png")
         page.screenshot(path=shot_path, full_page=False)
@@ -71,24 +79,24 @@ with sync_playwright() as p:
         links = page.locator('.recommendation-card a:has-text("Shop Now")').all()
         urls = [link.get_attribute("href") for link in links if link.get_attribute("href")]
 
-        observed_results[occasion_val] = {
+        res_key = f"{target_gender}_{occasion_val}"
+        observed_results[res_key] = {
             "titles": [c.strip() for c in cards if len(c.strip()) > 3],
             "urls": urls
         }
-        print(f"Extracted {len(observed_results[occasion_val]['titles'])} top recommendation cards for {occasion_val}:", flush=True)
-        for i, t in enumerate(observed_results[occasion_val]['titles'][:5], 1):
+        print(f"Extracted {len(observed_results[res_key]['titles'])} top recommendation cards for {occasion_val}:", flush=True)
+        for i, t in enumerate(observed_results[res_key]['titles'][:5], 1):
             print(f"   {i}. {t}", flush=True)
 
-    # Test Party
-    test_occasion("party", "browser_party_recommendations")
+    # 1. FEMALE ACCEPTANCE TESTS
+    print("\n" + "=" * 60, flush=True)
+    print("RUNNING FEMALE LIVE BROWSER TESTS", flush=True)
+    print("=" * 60, flush=True)
+    test_occasion("party", "browser_party_recommendations", "female")
+    test_occasion("casual", "browser_casual_recommendations", "female")
+    test_occasion("formal", "browser_formal_recommendations", "female")
 
-    # Test Casual
-    test_occasion("casual", "browser_casual_recommendations")
-
-    # Test Formal
-    test_occasion("formal", "browser_formal_recommendations")
-
-    # 3. View Details Modal/Page
+    # 2. View Details Modal/Page
     print("\n--- Testing View Details ---", flush=True)
     detail_btn = page.locator('.recommendation-card button:has-text("View Details")')
     if detail_btn.count() > 0:
@@ -99,6 +107,66 @@ with sync_playwright() as p:
         page.screenshot(path=shot_path, full_page=False)
         print(f"Captured View Details screenshot: {shot_path}", flush=True)
 
+    # 3. MALE ACCEPTANCE TESTS
+    print("\n" + "=" * 60, flush=True)
+    print("RUNNING MALE LIVE BROWSER TESTS", flush=True)
+    print("=" * 60, flush=True)
+    context_male = browser.new_context(viewport={"width": 1440, "height": 900})
+    page_male = context_male.new_page()
+
+    page_male.goto("http://localhost:3000/login", wait_until="domcontentloaded")
+    page_male.wait_for_selector('input[type="email"]', timeout=10000)
+    page_male.fill('input[type="email"]', "final_test_male@aurafit.com")
+    page_male.fill('input[type="password"]', "Password123!")
+    page_male.click('button[type="submit"]')
+    page_male.wait_for_timeout(3000)
+
+    page_male.goto("http://localhost:3000/recommendations", wait_until="domcontentloaded")
+    page_male.wait_for_timeout(3000)
+
+    def test_male_occasion(occasion_val, screenshot_name):
+        print(f"\n--- Testing Occasion: {occasion_val.upper()} (MALE) ---", flush=True)
+        occ_select = page_male.locator('select[name="occasion"]')
+        if occ_select.count() > 0:
+            occ_select.select_option(occasion_val)
+            page_male.wait_for_timeout(500)
+        
+        season_select = page_male.locator('select[name="season"]')
+        if season_select.count() > 0:
+            season_select.select_option("summer")
+            page_male.wait_for_timeout(500)
+
+        gen_btn = page_male.locator('button:has-text("Generate Recommendations"), button:has-text("Generate")')
+        if gen_btn.count() > 0:
+            print(f"Clicking Generate button for {occasion_val}...", flush=True)
+            gen_btn.first.click()
+            try:
+                page_male.wait_for_selector('.recommendation-card', timeout=20000)
+                page_male.wait_for_timeout(1500)
+            except Exception as e:
+                print(f"Wait warning for cards on {occasion_val}: {e}", flush=True)
+                page_male.wait_for_timeout(3000)
+        
+        shot_path = os.path.join(artifact_dir, f"{screenshot_name}.png")
+        page_male.screenshot(path=shot_path, full_page=False)
+        print(f"Captured screenshot: {shot_path}", flush=True)
+
+        cards = page_male.locator('.recommendation-card h3').all_inner_texts()
+        links = page_male.locator('.recommendation-card a:has-text("Shop Now")').all()
+        urls = [link.get_attribute("href") for link in links if link.get_attribute("href")]
+
+        res_key = f"male_{occasion_val}"
+        observed_results[res_key] = {
+            "titles": [c.strip() for c in cards if len(c.strip()) > 3],
+            "urls": urls
+        }
+        print(f"Extracted {len(observed_results[res_key]['titles'])} top recommendation cards for {occasion_val}:", flush=True)
+        for i, t in enumerate(observed_results[res_key]['titles'][:5], 1):
+            print(f"   {i}. {t}", flush=True)
+
+    test_male_occasion("party", "browser_male_party_recommendations")
+    test_male_occasion("casual", "browser_male_casual_recommendations")
+
     browser.close()
 
 print("\n" + "=" * 80, flush=True)
@@ -106,7 +174,7 @@ print("ANALYZING VISUAL BROWSER ACCEPTANCE RESULTS", flush=True)
 print("=" * 80, flush=True)
 
 overlap = False
-test_occs = ["party", "casual", "formal"]
+test_occs = ["female_party", "female_casual", "female_formal"]
 for i in range(len(test_occs)):
     for j in range(i + 1, len(test_occs)):
         o1, o2 = test_occs[i], test_occs[j]
@@ -119,6 +187,21 @@ for i in range(len(test_occs)):
         else:
             print(f"  [PASS] Browser 0 overlap between {o1.upper()} and {o2.upper()}", flush=True)
 
-if not overlap:
-    print("\n[SUCCESS] PERFECT BROWSER ACCEPTANCE: Zero repeated dresses across occasions in live UI!", flush=True)
+# Verify male results contain 0 dresses
+male_dresses = 0
+for m_key in ["male_party", "male_casual"]:
+    m_titles = observed_results.get(m_key, {}).get("titles", [])
+    for mt in m_titles:
+        import re
+        if re.search(r"\b(women|women's|womens|dress|gown|saree|kurti|anarkali)\b", mt.lower()):
+            print(f"  [FAIL] Found female dress in male results ({m_key}): {mt}", flush=True)
+            male_dresses += 1
+
+if male_dresses == 0:
+    print("  [PASS] Zero women's dresses in male browser results", flush=True)
+else:
+    print(f"  [FAIL] {male_dresses} women's dresses found in male browser results", flush=True)
+
+if not overlap and male_dresses == 0:
+    print("\n[SUCCESS] PERFECT BROWSER ACCEPTANCE: Zero repeated dresses and zero cross-gender leakage in live UI!", flush=True)
 print("=" * 80, flush=True)

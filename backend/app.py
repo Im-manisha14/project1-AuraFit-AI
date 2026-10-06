@@ -61,13 +61,8 @@ def create_app():
 
 
 def _seed_sample_outfits():
-    """Seed the database with sample outfits if the table is empty."""
-    from models.outfit import Outfit
-
-    if Outfit.query.first():
-        return  # Already seeded
-
-    print("🌱 Seeding database with sample outfits...")
+    """No mock outfits: live SerpApi recommendations are the single source of truth."""
+    return
 
     outfits = [
         # ── Casual ─────────────────────────────────────────────────
