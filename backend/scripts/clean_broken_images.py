@@ -1,6 +1,8 @@
+import os
 import sqlite3
 
-conn = sqlite3.connect('backend/aurafit.db')
+db_path = 'aurafit.db' if os.path.exists('aurafit.db') else os.path.join('backend', 'aurafit.db')
+conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
 broken_ids = [312, 314, 315, 316, 318, 338, 339, 370, 381]

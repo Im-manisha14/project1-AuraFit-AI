@@ -64,10 +64,103 @@ def generate_recommendations():
             min_price=min_price,
             max_price=max_price,
             price_range=price_range,
-            retailer=retailer
+            retailer=retailer,
+            gender=norm_gender,
+            category=category
         )
         similar = getattr(engine, 'last_similar_recommendations', [])
         stats = getattr(engine, 'last_stats', {})
+
+        # Phase 2: Authoritative validation immediately before API response
+        from services.product_validator import validate_live_product
+        validated_recs = []
+        gen_seen_ids = set()
+        gen_seen_urls = set()
+        gen_seen_imgs = set()
+        gen_occ_reg = {}
+
+        for r in recommendations:
+            v_res = validate_live_product(
+                candidate=r,
+                profile=profile,
+                requested_gender=norm_gender,
+                requested_category=category,
+                requested_occasion=occasion,
+                requested_season=season,
+                price_min=min_price,
+                price_max=max_price,
+                price_range=price_range,
+                retailer=retailer,
+                seen_identity_keys=gen_seen_ids,
+                seen_urls=gen_seen_urls,
+                seen_images=gen_seen_imgs,
+                occasion_registry=gen_occ_reg
+            )
+            if v_res['accepted']:
+                validated_recs.append(v_res['normalized_product'])
+
+        validated_sim = []
+        for s in similar:
+            v_res = validate_live_product(
+                candidate=s,
+                profile=profile,
+                requested_gender=norm_gender,
+                requested_category=category,
+                requested_occasion=occasion,
+                requested_season=season,
+                price_min=min_price,
+                price_max=max_price,
+                price_range=price_range,
+                retailer=retailer,
+                seen_identity_keys=gen_seen_ids,
+                seen_urls=gen_seen_urls,
+                seen_images=gen_seen_imgs,
+                occasion_registry=gen_occ_reg
+            )
+            if v_res['accepted']:
+                validated_sim.append(v_res['normalized_product'])
+
+        def _safe_print_line(msg):
+            try:
+                print(str(msg).encode('ascii', errors='replace').decode('ascii'))
+            except Exception:
+                pass
+
+        _safe_print_line(f"\n[RECOMMENDATION DEBUG]")
+        _safe_print_line(f"Requested:")
+        _safe_print_line(f"  gender={norm_gender}")
+        _safe_print_line(f"  occasion={occasion}")
+        _safe_print_line(f"  season={season}")
+        _safe_print_line(f"  price_range={price_range or (f'INR {min_price}-{max_price}' if (min_price or max_price) else 'all')}")
+        _safe_print_line(f"  skin_tone={skin_tone}")
+        _safe_print_line(f"Candidates fetched: {stats.get('candidates', len(recommendations))}")
+        _safe_print_line(f"Rejected:")
+        _safe_print_line(f"  gender = {stats.get('gender_rejected', 0)}")
+        _safe_print_line(f"  category = {stats.get('category_rejected', 0)}")
+        _safe_print_line(f"  occasion = {stats.get('occasion_rejected', 0)}")
+        _safe_print_line(f"  season = {stats.get('season_rejected', 0)}")
+        _safe_print_line(f"  price = {stats.get('price_rejected', 0)}")
+        _safe_print_line(f"  duplicate = {stats.get('duplicates_removed', 0)}")
+        _safe_print_line(f"  broken_image = {stats.get('image_rejected', 0)}")
+        _safe_print_line(f"  missing_url = {stats.get('url_rejected', 0)}")
+        _safe_print_line(f"  invalid_product_identity = 0")
+        _safe_print_line(f"Accepted: {len(validated_recs)}")
+        _safe_print_line(f"Final: {len(validated_recs)}")
+
+        for rec in validated_recs:
+            _safe_print_line(f"\n[ACCEPTED PRODUCT]")
+            _safe_print_line(f"  title={rec.get('title')}")
+            _safe_print_line(f"  gender={rec.get('gender')}")
+            _safe_print_line(f"  category={rec.get('category')}")
+            _safe_print_line(f"  primary_occasion={rec.get('primary_occasion')}")
+            _safe_print_line(f"  requested_occasion={occasion}")
+            _safe_print_line(f"  season={rec.get('season')}")
+            _safe_print_line(f"  price={rec.get('price')}")
+            _safe_print_line(f"  retailer={rec.get('retailer')}")
+            _safe_print_line(f"  product_url={rec.get('product_url')}")
+            _safe_print_line(f"  image_url={rec.get('image_url')}")
+            _safe_print_line(f"  identity_key={rec.get('product_identity_key')}")
+
 
         meta = build_response_meta(
             gender=norm_gender,
@@ -78,14 +171,14 @@ def generate_recommendations():
             price_min=min_price,
             price_max=max_price,
             requested_count=limit,
-            recommendations=recommendations,
+            recommendations=validated_recs,
             filter_stats=stats,
             is_live=True
         )
 
         return jsonify({
-            'recommendations': recommendations,
-            'similar_recommendations': similar,
+            'recommendations': validated_recs,
+            'similar_recommendations': validated_sim,
             'meta': meta
         }), 200
 
@@ -152,6 +245,7 @@ def get_collections():
     from models.user import UserProfile
     from services.recommendation_engine import RecommendationEngine
     from services.occasion_classifier import OccasionClassifier, SeasonClassifier
+    from services.product_validator import validate_live_product
     from extensions import db
     from sqlalchemy import func, desc, or_
 
@@ -192,84 +286,34 @@ def get_collections():
         seen_global_col_imgs = set()
         seen_global_col_urls = set()
         seen_global_col_ids = set()
+        global_occasion_registry = {}
 
         def attach_links(outfits, max_items=limit, required_occasion=None):
             """
-            Attach shopping links, validate gender/category, deduplicate globally,
-            and optionally post-classify products for a specific occasion.
-
-            When required_occasion is set, only products that ACCEPT or SECONDARY-match
-            that occasion via OccasionClassifier will be included.
+            Phase 14 & Phase 2: Collections must use the single authoritative production validator.
+            Validates live product authenticity, gender, category, occasion exclusivity,
+            season, broken image rejection, and cross-occasion duplicate protection.
             """
             result = []
             for o in outfits:
-                # 1. Product & category validation
-                prod_dict = {
-                    'title': o.name,
-                    'description': o.description or '',
-                    'category': o.category or '',
-                    'snippet': o.description or '',
-                    'brand': o.brand or '',
-                    'source': o.store or '',
-                    'product_url': o.product_url or '',
-                }
-                if gender == 'female':
-                    is_dress, _, _ = ProductValidator.is_actual_dress(prod_dict)
-                    if not is_dress:
-                        continue
-                is_compat, _, _ = ProductValidator.is_gender_compatible(prod_dict, gender)
-                if not is_compat:
-                    continue
-
-                # 2. Occasion classification guard (Section 3, 23)
-                if required_occasion and required_occasion not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape', 'minimalist'):
-                    occ_result = OccasionClassifier.classify(prod_dict, required_occasion, debug=False)
-                    if occ_result.decision == 'REJECT':
-                        continue  # Hard reject — wrong occasion
-
-                # 3. Image validation & global cross-collection deduplication
-                img = (o.image_url or '').strip()
-                if not img or '1V2w3X4y5' in img or 'dummy' in img or 'placeholder' in img:
-                    continue
-                tbn_m = re.search(r'q=tbn:([^&]+)', img)
-                img_k = tbn_m.group(1) if tbn_m else img.split('?')[0].strip()
-                if img_k in seen_global_col_imgs:
-                    continue
-
-                # 4. Canonical URL & ID deduplication
-                url = (o.product_url or '').strip()
-                canon_u = ProductValidator.canonicalize_url(url) if url else ''
-                if canon_u and canon_u in seen_global_col_urls:
-                    continue
-
-                cid = f"{o.store or ''}:{o.external_id or canon_u or o.name}"
-                if cid in seen_global_col_ids:
-                    continue
-
-                seen_global_col_imgs.add(img_k)
-                if canon_u:
-                    seen_global_col_urls.add(canon_u)
-                seen_global_col_ids.add(cid)
-
-                from services.product_contract import format_recommendation_contract
-                d = o.to_dict()
-                d['shopping_links'] = engine._generate_shopping_links(o, gender)
-                if o.product_url:
-                    d['exact_product_link_available'] = True
-                    d['shopping_url'] = canon_u or o.product_url
-                else:
-                    d['shopping_url'] = None
-
-                contract_item = format_recommendation_contract(
-                    item=d,
-                    fallback_gender=gender,
-                    fallback_category='dress' if gender == 'female' else 'clothing',
-                    fallback_occasion=required_occasion or o.occasion or 'casual',
-                    fallback_season=season
+                val_res = validate_live_product(
+                    candidate=o,
+                    profile=profile,
+                    requested_gender=gender,
+                    requested_category='dress' if gender == 'female' else 'clothing',
+                    requested_occasion=required_occasion,
+                    requested_season=season,
+                    seen_identity_keys=seen_global_col_ids,
+                    seen_urls=seen_global_col_urls,
+                    seen_images=seen_global_col_imgs,
+                    occasion_registry=global_occasion_registry
                 )
-                result.append(contract_item)
-                if len(result) >= max_items:
-                    break
+                if val_res['accepted']:
+                    norm_p = val_res['normalized_product']
+                    norm_p['shopping_links'] = engine._generate_shopping_links(o, gender)
+                    result.append(norm_p)
+                    if len(result) >= max_items:
+                        break
             return result
 
         from sqlalchemy import func as sqlfunc

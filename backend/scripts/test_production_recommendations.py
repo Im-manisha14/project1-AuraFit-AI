@@ -28,7 +28,12 @@ import requests
 from typing import Dict, Any, List, Optional, Tuple, Set
 
 # -- Attempt to import validators from the services layer ---
+import os
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 sys.path.insert(0, '.')
+
 try:
     from services.product_validator import (
         check_category_suitability,
@@ -65,15 +70,23 @@ TEST_CASES = [
 ]
 
 # -- Auth helper ---
-def get_auth_token(base_url):
+def get_auth_token(base_url, email=None, password=None):
+    if email and password:
+        try:
+            r = requests.post(f"{base_url}/api/auth/login", json={"email": email, "password": password}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                token = data.get("access_token") or data.get("token")
+                if token:
+                    return token
+        except Exception:
+            pass
+
     test_creds = [
-        {"email": "phase20@aurafit.ai",     "password": "Phase20Test!"},
-        {"email": "e2e_test@aurafit.com",    "password": "TestPass123!"},
-        {"email": "test@aurafit.ai",         "password": "TestPass123!"},
-        {"email": "demo@aurafit.ai",         "password": "Demo1234!"},
-        {"email": "manisha1411@gmail.com",   "password": "Manisha123!"},
-        {"email": "user@example.com",        "password": "password123"},
-        {"email": "admin@aurafit.ai",        "password": "Admin1234!"},
+        {"email": "final_test_female@aurafit.com", "password": "Password123!"},
+        {"email": "phase20@aurafit.ai",           "password": "Phase20Test!"},
+        {"email": "e2e_test@aurafit.com",          "password": "TestPass123!"},
+        {"email": "manisha1411@gmail.com",         "password": "Manisha123!"},
     ]
     for cred in test_creds:
         try:
@@ -211,9 +224,15 @@ def validate_product(p, expected_gender, expected_occasion, seen_urls, seen_imgs
     return True, "OK"
 
 
-def call_generate(base_url, token, gender, occasion, season, limit=8):
+def call_generate(base_url, token, gender, occasion, season, expected_cat="dress", limit=8):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    payload = {"occasion": occasion, "season": season, "limit": limit}
+    payload = {
+        "gender": gender,
+        "category": expected_cat,
+        "occasion": occasion,
+        "season": season,
+        "limit": limit
+    }
     try:
         r = requests.post(f"{base_url}/api/recommendations/generate", json=payload, headers=headers, timeout=TIMEOUT)
         if r.status_code == 200:
@@ -225,6 +244,7 @@ def call_generate(base_url, token, gender, occasion, season, limit=8):
     except Exception as e:
         print(f"  [ERROR] /generate failed: {e}")
         return None
+
 
 
 def call_collections(base_url, token, season):
@@ -246,19 +266,23 @@ def run_generate_tests(base_url, token):
     print("PHASE 20 -- /generate endpoint tests")
     print("=" * 60)
 
+    female_token = token
+    male_token = get_auth_token(base_url, "final_test_male@aurafit.com", "Password123!") or token
+
     total_pass = 0
     total_fail = 0
     total_products = 0
     rejection_counts = {"source":0,"image":0,"url":0,"gender":0,"category":0,"occasion":0,"duplicate":0}
 
-    global_seen_urls = set()
-    global_seen_imgs = set()
+    global_occasion_by_url = {}
+    global_occasion_by_img = {}
     global_seen_titles = set()
 
     for (gender, occasion, season, expected_cat, desc) in TEST_CASES:
         print(f"\n  [{desc}]")
 
-        products = call_generate(base_url, token, gender, occasion, season, limit=8)
+        active_token = male_token if gender == "male" else female_token
+        products = call_generate(base_url, active_token, gender, occasion, season, expected_cat=expected_cat, limit=8)
         if products is None:
             print(f"  {FAIL_COLOR}X API call failed{RESET}")
             total_fail += 1
@@ -288,13 +312,17 @@ def run_generate_tests(base_url, token):
                     canon = url.split("?")[0].rstrip("/")
                     img_key = img.split("?")[0]
 
-                if canon in global_seen_urls or img_key in global_seen_imgs:
-                    reason = "Cross-occasion duplicate"
+                if canon in global_occasion_by_url and global_occasion_by_url[canon] != occasion:
+                    reason = f"Cross-occasion duplicate (already in {global_occasion_by_url[canon]})"
+                    ok = False
+                    rejection_counts["duplicate"] += 1
+                elif img_key in global_occasion_by_img and global_occasion_by_img[img_key] != occasion:
+                    reason = f"Cross-occasion duplicate image (already in {global_occasion_by_img[img_key]})"
                     ok = False
                     rejection_counts["duplicate"] += 1
                 else:
-                    global_seen_urls.add(canon)
-                    global_seen_imgs.add(img_key)
+                    global_occasion_by_url[canon] = occasion
+                    global_occasion_by_img[img_key] = occasion
 
             if ok:
                 case_pass += 1

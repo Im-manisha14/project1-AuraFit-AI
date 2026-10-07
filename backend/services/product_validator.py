@@ -399,8 +399,13 @@ def validate_live_product(
         return {"accepted": False, "reason": "Invalid or missing image URL protocol", "normalized_product": None}
     
     img_lower = img_url.lower()
-    if any(bad in img_lower for bad in ['aurafit.store', 'example.com', 'placeholder', 'dummy', 'unsplash', 'default_avatar', 'no-image', '1v2w3x4y5']):
-        return {"accepted": False, "reason": "Disallowed placeholder/mock image URL", "normalized_product": None}
+    disallowed_img_markers = [
+        'aurafit.store', 'example.com', 'placeholder', 'dummy', 'unsplash',
+        'default_avatar', 'no-image', '1v2w3', '1mo2p', '61j7k', 't67u1a',
+        'test_img', 'mock', 'sample', 'image_unavailable', 'broken'
+    ]
+    if any(bad in img_lower for bad in disallowed_img_markers):
+        return {"accepted": False, "reason": "Disallowed placeholder/mock/dummy image URL", "normalized_product": None}
 
     img_key = extract_image_key(img_url)
     if seen_images is not None and img_key:
@@ -431,6 +436,8 @@ def validate_live_product(
             return {"accepted": False, "reason": "Duplicate product identity key", "normalized_product": None}
         if brand_title_key in seen_identity_keys:
             return {"accepted": False, "reason": "Duplicate retailer + normalized title", "normalized_product": None}
+        if norm_t in seen_identity_keys:
+            return {"accepted": False, "reason": "Duplicate normalized title", "normalized_product": None}
 
     # 5. Phase 3: Strict Gender Validation
     target_g = requested_gender or (getattr(profile, 'gender', None) if profile else None) or c.get('gender') or 'female'
@@ -460,25 +467,37 @@ def validate_live_product(
         if occ_res.decision == 'REJECT':
             return {"accepted": False, "reason": f"Occasion mismatch: {occ_res.reason}", "normalized_product": None}
 
-        # Primary occasion domination check
-        if norm_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports'):
-            if primary_occ != norm_occ and best_score >= 10.0 and best_score > (occ_res.confidence * 16.0 * 1.1):
-                return {
-                    "accepted": False,
-                    "reason": f"Occasion mismatch: Primary intrinsic occasion is '{primary_occ}' (score {best_score:.1f} vs requested {norm_occ})",
-                    "normalized_product": None
-                }
+        # Primary Occasion Exclusivity: Distinct occasions cannot cross-contaminate
+        if norm_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports', 'date', 'brunch', 'dinner', 'cocktail', 'traditional'):
+            if primary_occ != norm_occ:
+                if primary_occ == 'casual' and norm_occ in ('party', 'formal', 'office', 'wedding'):
+                    return {
+                        "accepted": False,
+                        "reason": f"Occasion mismatch: Casual dress cannot appear under {norm_occ} (primary_occasion=casual)",
+                        "normalized_product": None
+                    }
+                if primary_occ in ('party', 'cocktail') and norm_occ in ('casual', 'formal', 'office', 'sports'):
+                    return {
+                        "accepted": False,
+                        "reason": f"Occasion mismatch: Party/cocktail dress cannot appear under {norm_occ} (primary_occasion={primary_occ})",
+                        "normalized_product": None
+                    }
+                if best_score >= 8.0 and best_score > (occ_res.confidence * 16.0 * 1.05):
+                    return {
+                        "accepted": False,
+                        "reason": f"Occasion mismatch: Primary intrinsic occasion is '{primary_occ}' (score {best_score:.1f} vs requested {norm_occ})",
+                        "normalized_product": None
+                    }
 
     # Phase 12: Cross-occasion duplicate protection
-    if occasion_registry is not None:
-        registered_occ = occasion_registry.get(identity_key) or occasion_registry.get(canon_url)
-        if registered_occ and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):
-            if registered_occ != norm_occ:
-                return {
-                    "accepted": False,
-                    "reason": f"Cross-occasion violation: Product already registered for '{registered_occ}', cannot appear in '{norm_occ}'",
-                    "normalized_product": None
-                }
+    if occasion_registry is not None and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):
+        registered_occ = occasion_registry.get(identity_key) or (occasion_registry.get(canon_url) if canon_url else None) or (occasion_registry.get(img_key) if img_key else None)
+        if registered_occ and registered_occ != norm_occ:
+            return {
+                "accepted": False,
+                "reason": f"Cross-occasion violation: Product already registered for '{registered_occ}', cannot appear in '{norm_occ}'",
+                "normalized_product": None
+            }
 
     # 8. Phase 7: Season Validation
     norm_seas = normalize_season(requested_season) if requested_season else 'all'
@@ -518,14 +537,16 @@ def validate_live_product(
     if seen_identity_keys is not None:
         seen_identity_keys.add(identity_key)
         seen_identity_keys.add(brand_title_key)
+        seen_identity_keys.add(norm_t)
     if seen_urls is not None and canon_url:
         seen_urls.add(canon_url)
-    if seen_images is not None and img_key:
-        seen_images.add(img_key)
-    if occasion_registry is not None and norm_occ != 'all':
-        occasion_registry[identity_key] = primary_occ
+    if occasion_registry is not None and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):
+        assigned_occ = norm_occ or primary_occ
+        occasion_registry[identity_key] = assigned_occ
         if canon_url:
-            occasion_registry[canon_url] = primary_occ
+            occasion_registry[canon_url] = assigned_occ
+        if img_key:
+            occasion_registry[img_key] = assigned_occ
 
     # 11. Phase 18: Build Standardized Contract Product
     ext_id = (c.get('external_id') or f"serpapi_{c.get('id') or identity_key}").strip()

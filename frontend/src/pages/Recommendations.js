@@ -552,7 +552,7 @@ const Recommendations = () => {
             </div>
             
             <div className="recommendations-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
-              {recommendations.filter(rec => !failedImages.has(rec.outfit?.id)).map((rec, index) => (
+              {recommendations.filter(rec => rec.outfit?.image_url && !failedImages.has(rec.outfit?.id) && !failedImages.has(rec.outfit?.external_id)).map((rec, index) => (
                 <motion.div 
                   key={index} 
                   initial={{ opacity: 0, y: 50 }}
@@ -564,7 +564,7 @@ const Recommendations = () => {
                 >
                   {/* Image Section */}
                   <div className="relative bg-gray-100 h-64 overflow-hidden flex-shrink-0">
-                    {rec.outfit?.image_url && !failedImages.has(rec.outfit?.id) ? (
+                    {rec.outfit?.image_url && !failedImages.has(rec.outfit?.id) && !failedImages.has(rec.outfit?.external_id) ? (
                       <img
                         src={rec.outfit.image_url}
                         alt={rec.outfit.name}
@@ -573,16 +573,18 @@ const Recommendations = () => {
                           if (rec.outfit?.additional_images && rec.outfit.additional_images.length > 0 && e.target.src !== rec.outfit.additional_images[0]) {
                             e.target.src = rec.outfit.additional_images[0];
                           } else {
-                            setFailedImages(prev => new Set(prev).add(rec.outfit?.id));
+                            setFailedImages(prev => {
+                              const next = new Set(prev);
+                              if (rec.outfit?.id) next.add(rec.outfit.id);
+                              if (rec.outfit?.external_id) next.add(rec.outfit.external_id);
+                              return next;
+                            });
+                            const card = e.target.closest('.recommendation-card');
+                            if (card) card.style.display = 'none';
                           }
                         }}
                       />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                        <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" height="4em" width="4em" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                        <p className="mt-2 text-sm font-medium">Image unavailable</p>
-                      </div>
-                    )}
+                    ) : null}
                     
                     {/* Rank Badge */}
                     <div className="absolute top-4 left-4 bg-gray-900 text-white w-12 h-12 flex items-center justify-center font-bold text-lg">
@@ -944,9 +946,9 @@ const Recommendations = () => {
                   const outfits = collections[key];
                   if (!outfits || outfits.length === 0) return null;
                   const uniqueOutfits = outfits.filter(outfit => {
-                    if (failedImages.has(outfit.id)) return false;
+                    if (failedImages.has(outfit.id) || failedImages.has(outfit.external_id)) return false;
                     const img = (outfit.image_url || outfit.image || '').trim();
-                    if (!img || img.includes('1V2w3X4y5') || img.includes('dummy') || img.includes('placeholder')) return false;
+                    if (!img || img.includes('1V2w3') || img.includes('1mO2P') || img.includes('61J7K') || img.includes('T67U1A') || img.includes('dummy') || img.includes('placeholder')) return false;
                     const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
                     if (seenPageImgs.has(imgKey)) return false;
                     seenPageImgs.add(imgKey);
@@ -978,21 +980,23 @@ const Recommendations = () => {
                         >
                           {/* Outfit Image */}
                           <div className="relative h-48 bg-gray-100 overflow-hidden flex-shrink-0">
-                            {outfit.image_url && !failedImages.has(outfit.id) ? (
+                            {outfit.image_url && !failedImages.has(outfit.id) && !failedImages.has(outfit.external_id) ? (
                               <img
                                 src={outfit.image_url}
                                 alt={outfit.name}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                                onError={() => { 
-                                  setFailedImages(prev => new Set(prev).add(outfit.id));
+                                onError={(e) => { 
+                                  setFailedImages(prev => {
+                                    const next = new Set(prev);
+                                    if (outfit.id) next.add(outfit.id);
+                                    if (outfit.external_id) next.add(outfit.external_id);
+                                    return next;
+                                  });
+                                  const card = e.target.closest('.group');
+                                  if (card) card.style.display = 'none';
                                 }}
                               />
-                            ) : (
-                              <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                                <svg stroke="currentColor" fill="none" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" height="4em" width="4em" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                                <p className="mt-2 text-sm font-medium">Image unavailable</p>
-                              </div>
-                            )}
+                            ) : null}
                             {outfit.match_score != null && (
                               <div className="absolute top-2 right-2 bg-amber-600 text-white px-2 py-0.5 text-xs font-bold">
                                 {(outfit.match_score * 100).toFixed(0)}%

@@ -131,6 +131,8 @@ class RecommendationEngine:
         max_price: Optional[float] = None,
         price_range: Optional[str] = None,
         retailer: Optional[str] = None,
+        gender: Optional[str] = None,
+        category: Optional[str] = None,
     ) -> List[Dict]:
         """Generate personalized outfit recommendations using hybrid filtering."""
         from models.outfit import Outfit, Recommendation
@@ -144,10 +146,12 @@ class RecommendationEngine:
             from services.recommendation_engine import SKIN_TONE_COMPATIBLE_COLORS
             compatible_colors = SKIN_TONE_COMPATIBLE_COLORS.get(skin_tone.lower(), [])
 
-        raw_gender = (getattr(profile, 'gender', None) or '').lower() if profile else ''
-        norm_gender = ProductValidator.normalize_gender(raw_gender)
-        viewer_gender = norm_gender if norm_gender != 'unknown' else raw_gender
-        target_category = 'dress' if norm_gender == 'female' else 'clothing'
+        req_gender = gender or (getattr(profile, 'gender', None) or '').lower() if profile else (gender or '')
+        norm_gender = ProductValidator.normalize_gender(req_gender)
+        if norm_gender not in ('female', 'male'):
+            norm_gender = 'female'
+        viewer_gender = norm_gender
+        target_category = category or ('dress' if norm_gender == 'female' else 'clothing')
         collab_map = self._build_collaborative_map(profile)
 
         # ── EXCLUSIVE LIVE SHOPPING MODE ─────────────────────────────────
@@ -165,7 +169,8 @@ class RecommendationEngine:
                 min_price=min_price,
                 max_price=max_price,
                 price_range=price_range,
-                retailer=retailer
+                retailer=retailer,
+                gender=norm_gender
             )
             self.last_stats = getattr(shopping_service, 'last_stats', {})
             from services.product_contract import format_recommendation_contract

@@ -14,7 +14,7 @@ try:
 except Exception as _e:
     raise ImportError(f"Playwright is required to run browser acceptance tests: {_e}")
 
-artifact_dir = r"C:\Users\DELL\.gemini\antigravity-ide\brain\417f3524-17e9-47a3-b154-590304b2580d"
+artifact_dir = r"C:\Users\DELL\.gemini\antigravity-ide\brain\fb4b9c76-20d7-4ec5-bd27-696b27ad2ea6"
 os.makedirs(artifact_dir, exist_ok=True)
 
 print("=" * 80, flush=True)

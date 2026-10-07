@@ -561,9 +561,14 @@ class ProductValidator:
         url_clean = image_url.strip().lower()
         if not (url_clean.startswith('http://') or url_clean.startswith('https://')):
             return False, 'Invalid image protocol'
-        # Reject placeholders, mock domains, Unsplash, generic defaults
-        if any(bad in url_clean for bad in ['aurafit.store', 'example.com', 'placeholder', 'unsplash', 'default_avatar', 'no-image', 'avatar']):
-            return False, 'Disallowed placeholder or mock image domain'
+        # Reject placeholders, mock domains, dummy tokens, Unsplash, generic defaults
+        bad_patterns = [
+            'aurafit.store', 'example.com', 'placeholder', 'dummy', 'unsplash',
+            'default_avatar', 'no-image', 'avatar', '1v2w3', '1mo2p', '61j7k',
+            't67u1a', 'test_img', 'mock', 'image_unavailable', 'broken'
+        ]
+        if any(bad in url_clean for bad in bad_patterns):
+            return False, 'Disallowed placeholder, mock, or dummy image URL'
         return True, 'Valid authentic image'
 
 
@@ -1654,10 +1659,27 @@ class SerpApiShoppingService:
             # Apply to BOTH genders when occasion is specific (not 'all')
             if occasion and occasion.lower() not in ('all', ''):
                 occ_result = OccasionClassifier.classify(it, occasion, debug=False)
+                primary_occ, best_score = OccasionClassifier.detect_primary_occasion_with_score(it)
                 if occ_result.decision == 'REJECT':
                     stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
                     log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: {occ_result.reason}", canonical_product_id=canonical_id)
                     continue
+
+                # Phase 6 & Phase 5: Primary Occasion Exclusivity
+                if occasion.lower() in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports'):
+                    if primary_occ != occasion.lower():
+                        if primary_occ == 'casual' and occasion.lower() in ('party', 'formal', 'office', 'wedding'):
+                            stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
+                            log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Casual dress cannot appear under {occasion} (primary={primary_occ})", canonical_product_id=canonical_id)
+                            continue
+                        if primary_occ in ('party', 'cocktail') and occasion.lower() in ('casual', 'formal', 'office', 'sports'):
+                            stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
+                            log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Party dress cannot appear under {occasion} (primary={primary_occ})", canonical_product_id=canonical_id)
+                            continue
+                        if best_score >= 8.0 and best_score > (occ_result.confidence * 16.0 * 1.05):
+                            stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
+                            log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Primary occasion {primary_occ} score {best_score:.1f} dominates {occasion}", canonical_product_id=canonical_id)
+                            continue
 
             # 4c. Season classification (post-retrieval validation)
             if season and season.lower() not in ('all', ''):
@@ -1838,7 +1860,8 @@ class SerpApiShoppingService:
         min_price: Optional[float] = None,
         max_price: Optional[float] = None,
         price_range: Optional[str] = None,
-        retailer: Optional[str] = None
+        retailer: Optional[str] = None,
+        gender: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Fetches live products from SerpApi Google Shopping using parallel multi-query execution.
@@ -1853,7 +1876,7 @@ class SerpApiShoppingService:
             print("[ShoppingService] SERPAPI_KEY is not configured")
             return []
 
-        norm_gender = ProductValidator.normalize_gender(getattr(profile, 'gender', None) if profile else None)
+        norm_gender = ProductValidator.normalize_gender(gender or (getattr(profile, 'gender', None) if profile else None))
         if norm_gender not in ('female', 'male'):
             norm_gender = 'female'
 

@@ -14,7 +14,9 @@ REQUIRED_CONTRACT_FIELDS = [
     'style_type', 'brand', 'retailer', 'store', 'price', 'currency', 'original_price',
     'discount', 'availability', 'is_live', 'is_purchasable', 'in_stock', 'image_url',
     'additional_images', 'product_url', 'shopping_url', 'exact_product_link_available',
-    'colors', 'description', 'match_score'
+    'colors', 'description', 'match_score',
+    'primary_occasion', 'occasion_confidence', 'season_confidence', 'gender_confidence',
+    'category_confidence', 'image_valid', 'product_identity_key'
 ]
 
 def parse_discount_value(discount_raw: Any, price: Optional[float] = None, original_price: Optional[float] = None) -> Optional[int]:
@@ -182,12 +184,25 @@ def format_recommendation_contract(
         'description': description,
         'match_score': round(match_score, 2),
         'scores': final_scores,
-        'overall_score': round(match_score, 2)
+        'overall_score': round(match_score, 2),
+        'primary_occasion': (item.get('primary_occasion') or occasion or 'casual').strip().lower(),
+        'occasion_confidence': round(float(item.get('occasion_confidence') if item.get('occasion_confidence') is not None else 0.85), 2),
+        'season_confidence': round(float(item.get('season_confidence') if item.get('season_confidence') is not None else 0.85), 2),
+        'gender_confidence': round(float(item.get('gender_confidence') if item.get('gender_confidence') is not None else 1.0), 2),
+        'category_confidence': round(float(item.get('category_confidence') if item.get('category_confidence') is not None else 1.0), 2),
+        'image_valid': bool(item.get('image_valid', True) and bool(image_url)),
+        'product_identity_key': str(item.get('product_identity_key') or f"{retailer}::{external_id}")
     }
 
     # Support legacy/frontend access through outfit sub-dict while strictly satisfying top-level contract
     contract_obj['outfit'] = dict(contract_obj)
     return contract_obj
+
+
+def validate_live_product(*args, **kwargs):
+    """Re-export of single authoritative production validator."""
+    from services.product_validator import validate_live_product as _vlp
+    return _vlp(*args, **kwargs)
 
 
 def validate_product_schema(product: Dict[str, Any]) -> bool:
