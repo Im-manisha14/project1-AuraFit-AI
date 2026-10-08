@@ -101,7 +101,7 @@ def get_outfits():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@bp.route('/<int:outfit_id>', methods=['GET'])
+@bp.route('/<outfit_id>', methods=['GET'])
 @jwt_required()
 def get_outfit(outfit_id):
     from models.outfit import Outfit
@@ -109,7 +109,18 @@ def get_outfit(outfit_id):
     from extensions import db
     
     try:
-        outfit = db.session.get(Outfit, outfit_id)
+        outfit = None
+        try:
+            int_id = int(outfit_id)
+            outfit = db.session.get(Outfit, int_id)
+        except (ValueError, TypeError):
+            pass
+
+        if not outfit:
+            outfit = Outfit.query.filter_by(external_id=str(outfit_id)).first()
+        if not outfit and 'sim_' in str(outfit_id):
+            clean_ext = str(outfit_id).replace('serpapi_sim_', 'serpapi_')
+            outfit = Outfit.query.filter_by(external_id=clean_ext).first()
         
         if not outfit:
             return jsonify({'error': 'Outfit not found'}), 404

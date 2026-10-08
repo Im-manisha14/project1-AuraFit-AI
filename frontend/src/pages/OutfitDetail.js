@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { outfitAPI, recommendationAPI } from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiArrowLeft, FiShoppingBag, FiStar } from 'react-icons/fi';
@@ -31,8 +31,11 @@ const SHOP_LABELS = {
 const OutfitDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [outfit, setOutfit] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const location = useLocation();
+  const passedOutfit = location.state?.outfit;
+
+  const [outfit, setOutfit] = useState(passedOutfit || null);
+  const [loading, setLoading] = useState(!passedOutfit);
   const [error, setError] = useState(null);
   
   const [similarOutfits, setSimilarOutfits] = useState([]);
@@ -45,12 +48,23 @@ const OutfitDetail = () => {
 
 
   useEffect(() => {
+    if (location.state?.outfit && (String(location.state.outfit.id) === String(id) || location.state.outfit.external_id === String(id))) {
+      setOutfit(location.state.outfit);
+      setLoading(false);
+    }
+
     const fetchOutfit = async () => {
       try {
         const res = await outfitAPI.getOutfit(id);
-        setOutfit(res.data.outfit);
+        const fetched = res.data.outfit;
+        if (location.state?.outfit?.image_url && (String(location.state.outfit.id) === String(id) || location.state.outfit.external_id === String(id))) {
+          fetched.image_url = location.state.outfit.image_url;
+        }
+        setOutfit(fetched);
       } catch (err) {
-        setError('Could not load outfit details.');
+        if (!location.state?.outfit) {
+          setError('Could not load outfit details.');
+        }
       } finally {
         setLoading(false);
       }
@@ -70,7 +84,7 @@ const OutfitDetail = () => {
 
     fetchOutfit();
     fetchSimilar();
-  }, [id]);
+  }, [id, location.state]);
 
   if (loading) {
     return (
@@ -346,7 +360,7 @@ const OutfitDetail = () => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.1 }}
                     className="bg-white border border-gray-100 hover:border-gray-300 transition-colors cursor-pointer group flex flex-col"
-                    onClick={() => navigate(`/outfit/${item.id}`)}
+                    onClick={() => navigate(`/outfit/${item.id}`, { state: { outfit: item } })}
                   >
                     <div className="relative aspect-[3/4] bg-gray-100 overflow-hidden">
                       {item.image_url && !failedImages.has(item.id) ? (

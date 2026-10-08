@@ -708,6 +708,14 @@ class SeasonClassifier:
         )
 
     @classmethod
+    def detect_primary_season(cls, product_or_text):
+        if isinstance(product_or_text, dict):
+            norm_text = build_normalized_product_text(product_or_text)
+        else:
+            norm_text = str(product_or_text).lower()
+        return cls._detect_primary_season(norm_text)
+
+    @classmethod
     def _detect_primary_season(cls, norm_text):
         best = "all"
         best_score = 0.0

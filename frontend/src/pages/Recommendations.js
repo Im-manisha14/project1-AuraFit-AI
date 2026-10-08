@@ -180,10 +180,15 @@ const Recommendations = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadCollections = async () => {
+  const loadCollections = async (seasonOverride) => {
     setCollectionsLoading(true);
     try {
-      const res = await recommendationAPI.getCollections({ season: 'all', limit: 8 });
+      const activeSeason = seasonOverride !== undefined ? seasonOverride : (filters.season || 'all');
+      const res = await recommendationAPI.getCollections({ 
+        season: activeSeason, 
+        limit: 8,
+        gender: userGender || undefined 
+      });
       const colData = res.data || {};
       if (colData.collections) {
         const normCols = {};
@@ -213,7 +218,8 @@ const Recommendations = () => {
       const isComplete = !!(profile?.body_type && profile?.age && profile?.gender);
       
       setProfileComplete(isComplete);
-      if (profile?.gender) setUserGender(profile.gender.toLowerCase());
+      const userGen = profile?.gender ? profile.gender.toLowerCase() : '';
+      if (userGen) setUserGender(userGen);
 
       // Auto-generate if we just arrived from profile save
       if (autoGenerateRef.current && isComplete) {
@@ -223,7 +229,14 @@ const Recommendations = () => {
         setFailedImages(new Set());
         setLoading(true);
         try {
-          const response = await recommendationAPI.generate({ occasion: 'casual', season: 'all', limit: 25, results: 25 });
+          const response = await recommendationAPI.generate({ 
+            occasion: 'casual', 
+            season: 'all', 
+            gender: userGen || undefined,
+            category: userGen === 'male' ? 'clothing' : 'dress',
+            limit: 25, 
+            results: 25 
+          });
           setRawRecommendations(response.data.recommendations || []);
           setRawSimilarRecommendations(response.data.similar_recommendations || []);
           setHasGenerated(true);
@@ -245,10 +258,20 @@ const Recommendations = () => {
   };
 
   const handleFilterChange = (e) => {
-    setFilters({
-      ...filters,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    setFilters(prev => ({
+      ...prev,
+      [name]: value,
+    }));
+    // If occasion or season changed, clear stale recommendations immediately
+    if (name === 'occasion' || name === 'season') {
+      setRawRecommendations([]);
+      setRawSimilarRecommendations([]);
+      setHasGenerated(false);
+      if (name === 'season') {
+        loadCollections(value);
+      }
+    }
   };
 
   const generateRecommendations = async () => {
@@ -264,6 +287,8 @@ const Recommendations = () => {
     try {
       const payload = {
         ...filters,
+        gender: userGender || undefined,
+        category: userGender === 'male' ? 'clothing' : 'dress',
         results: Number(filters.limit || 25),
         price_range: priceRange !== 'custom' ? priceRange : undefined,
         min_price: priceRange === 'custom' && customMin !== '' ? Number(customMin) : undefined,
@@ -732,7 +757,7 @@ const Recommendations = () => {
                         <motion.button
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
-                          onClick={() => navigate(`/outfit/${rec.outfit?.id}`)}
+                          onClick={() => navigate(`/outfit/${rec.outfit?.id}`, { state: { outfit: rec.outfit } })}
                           className="w-full bg-white border border-gray-900 text-gray-900 py-3 font-medium text-xs tracking-widest uppercase hover:bg-gray-50 transition-colors flex items-center justify-center space-x-2"
                         >
                           <span>View Details</span>
@@ -849,7 +874,7 @@ const Recommendations = () => {
                   <div className="flex flex-col gap-1.5 mt-auto">
                     {sim.id && (
                       <button
-                        onClick={() => navigate(`/outfit/${sim.id}`)}
+                        onClick={() => navigate(`/outfit/${sim.id}`, { state: { outfit: sim } })}
                         className="w-full bg-white border border-gray-900 text-gray-900 py-2 text-xs font-semibold uppercase tracking-wider hover:bg-gray-50 flex items-center justify-center gap-1.5"
                       >
                         <FiStar className="text-xs" />
@@ -979,7 +1004,10 @@ const Recommendations = () => {
                           className="flex-shrink-0 w-60 bg-white border border-gray-200 overflow-visible shadow-sm hover:shadow-md transition-all group flex flex-col"
                         >
                           {/* Outfit Image */}
-                          <div className="relative h-48 bg-gray-100 overflow-hidden flex-shrink-0">
+                          <div 
+                            className="relative h-48 bg-gray-100 overflow-hidden flex-shrink-0 cursor-pointer"
+                            onClick={() => outfit.id && navigate(`/outfit/${outfit.id}`, { state: { outfit } })}
+                          >
                             {outfit.image_url && !failedImages.has(outfit.id) && !failedImages.has(outfit.external_id) ? (
                               <img
                                 src={outfit.image_url}
@@ -1007,7 +1035,13 @@ const Recommendations = () => {
                           {/* Card Body */}
                           <div className="p-4 flex-1 flex flex-col">
                             <div className="flex items-start justify-between gap-1 mb-1">
-                              <p className="font-semibold text-gray-900 text-sm truncate flex-1" title={outfit.name}>{outfit.name}</p>
+                              <p 
+                                className="font-semibold text-gray-900 text-sm truncate flex-1 cursor-pointer hover:text-amber-600 transition-colors" 
+                                title={outfit.name}
+                                onClick={() => outfit.id && navigate(`/outfit/${outfit.id}`, { state: { outfit } })}
+                              >
+                                {outfit.name}
+                              </p>
                               <GenderBadge gender={outfit.gender} />
                             </div>
                             <p className="text-xs text-gray-500 mb-2 capitalize tracking-wide">{outfit.style_type}</p>

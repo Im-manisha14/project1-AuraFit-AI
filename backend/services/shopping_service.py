@@ -1135,11 +1135,13 @@ class SerpApiShoppingService:
 
     @staticmethod
     def generate_stable_external_id(it: dict, direct_url: str, retailer: str, is_similar: bool = False) -> str:
-        """Generate a collision-free, deterministic external ID from SerpApi metadata."""
+        """Generate a collision-free, deterministic external ID from SerpApi metadata (Step 3 & 10)."""
         raw_id = it.get('product_id') or it.get('id')
-        prefix = "serpapi_sim" if is_similar else "serpapi"
+        prefix = "serpapi"
         if raw_id:
-            return f"{prefix}_{raw_id}"
+            # Strip any legacy sim_ prefix from raw_id
+            clean_raw_id = str(raw_id).replace('sim_', '')
+            return f"{prefix}_{clean_raw_id}"
         seed = f"{retailer}_{direct_url}_{it.get('title', '')}"
         h = hashlib.sha256(seed.encode('utf-8')).hexdigest()[:16]
         return f"{prefix}_{h}"
@@ -2248,6 +2250,13 @@ class SerpApiShoppingService:
         seen_sim_images = set()
         seen_sim_retailers = {}
 
+        from services.product_validator import canonical_product_key, canonicalize_url
+        main_key = canonical_product_key(main_product)
+        main_url = canonicalize_url(main_product.get('product_url') or main_product.get('shopping_url'))
+        seen_sim_keys = {main_key} if main_key else set()
+        if main_url:
+            seen_sim_urls.add(main_url)
+
         main_img = (main_product.get('image_url') or main_product.get('image') or '').strip()
         if main_img:
             tbn_m = re.search(r'q=tbn:([^&]+)', main_img)
@@ -2264,6 +2273,9 @@ class SerpApiShoppingService:
             if not title or not thumbnail or price is None:
                 continue
             if it.get('product_id') == main_product.get('external_id') or title.lower() == (main_product.get('title') or '').lower():
+                continue
+            cand_key = canonical_product_key(it)
+            if cand_key and cand_key in seen_sim_keys:
                 continue
             if pre_retailer.lower() == 'aurafit official':
                 continue
@@ -2356,7 +2368,7 @@ class SerpApiShoppingService:
                 if discount_pct > 0:
                     discount_str = f"{discount_pct}% OFF"
 
-            sim_ext_id = self.generate_stable_external_id(it, direct_url, final_retailer, is_similar=True)
+            sim_ext_id = self.generate_stable_external_id(it, direct_url, final_retailer, is_similar=False)
             outfit_record = self._persist_live_outfit(
                 external_id=sim_ext_id,
                 title=title,
@@ -2423,7 +2435,28 @@ class SerpApiShoppingService:
     ) -> Optional[Outfit]:
         """Upsert a live product into the Outfit table so detail routes can load it with 100% identity."""
         try:
+            # Step 5 & 6: Determine occasion and season deterministically from the product itself
+            p_data = {'title': title, 'category': category, 'store': retailer, 'brand': brand, 'description': f"{retailer} {category}"}
+            det_occ = OccasionClassifier.detect_primary_occasion(p_data) or 'casual'
+            det_season = SeasonClassifier.detect_primary_season(p_data) or 'all'
+
+            canon_u = self.canonicalize_url(product_url)
+            tbn_m = re.search(r'q=tbn:([^&]+)', image_url)
+            img_k = tbn_m.group(1) if tbn_m else image_url.split('?')[0].strip()
+
+            # Multi-key lookup to prevent creating duplicate rows for the same physical product (Step 3 & 4)
             existing = Outfit.query.filter_by(external_id=external_id).first()
+            if not existing and 'sim_' in external_id:
+                clean_ext = external_id.replace('serpapi_sim_', 'serpapi_')
+                existing = Outfit.query.filter_by(external_id=clean_ext).first()
+            if not existing and canon_u:
+                existing = Outfit.query.filter(
+                    (Outfit.product_url == product_url) |
+                    (Outfit.product_url.like(f"{canon_u}%"))
+                ).first()
+            if not existing and img_k and len(img_k) > 10:
+                existing = Outfit.query.filter(Outfit.image_url.like(f"%{img_k}%")).first()
+
             if existing:
                 existing.name = title
                 existing.brand = brand
@@ -2437,13 +2470,8 @@ class SerpApiShoppingService:
                 existing.gender = gender
                 existing.category = category
                 existing.colors = colors
-                # CRITICAL FIX: Never overwrite existing intrinsic occasion with the requested
-                # occasion — this prevents DB corruption when a product is fetched under a
-                # different occasion in a later request.
-                # Only update occasion if the record has a blank/unknown placeholder.
-                if not existing.occasion or existing.occasion in ('', 'all', 'unknown', 'casual') and occasion not in ('', 'all', 'unknown'):
-                    existing.occasion = occasion
-                existing.season = season
+                existing.occasion = det_occ
+                existing.season = det_season
                 existing.in_stock = True
                 existing.purchasable = True
                 existing.source = 'serpapi'
@@ -2454,7 +2482,7 @@ class SerpApiShoppingService:
             new_outfit = Outfit(
                 external_id=external_id,
                 name=title,
-                description=f"Live {retailer} {category} curated for {occasion} wear.",
+                description=f"Live {retailer} {category} curated for {det_occ} wear.",
                 category=category,
                 gender=gender,
                 colors=colors,
@@ -2470,9 +2498,9 @@ class SerpApiShoppingService:
                 in_stock=True,
                 purchasable=True,
                 source='serpapi',
-                occasion=occasion,
-                season=season,
-                style_type='casual',
+                occasion=det_occ,
+                season=det_season,
+                style_type=det_occ,
                 comfort_score=4.5,
                 body_type_compatibility=['all']
             )

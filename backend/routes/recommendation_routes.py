@@ -566,6 +566,7 @@ def get_similar(outfit_id):
     from models.outfit import Outfit
     from models.user import UserProfile, StylePreference
     from services.shopping_service import SerpApiShoppingService
+    from services.product_validator import validate_live_product, canonical_product_key, canonicalize_url, extract_image_key
     from extensions import db
     
     try:
@@ -574,19 +575,51 @@ def get_similar(outfit_id):
         
         main_outfit = db.session.get(Outfit, outfit_id)
         if not main_outfit:
+            # Fallback lookup by external_id
+            main_outfit = Outfit.query.filter_by(external_id=str(outfit_id)).first()
+        if not main_outfit:
             return jsonify({'error': 'Outfit not found'}), 404
             
         profile = UserProfile.query.filter_by(user_id=user_id).first()
         preferences = StylePreference.query.filter_by(user_id=user_id).first()
         
         shopping_service = SerpApiShoppingService()
-        compatible_colors = main_outfit.colors if main_outfit.colors else []
-        occasion = main_outfit.occasion or 'casual'
         
         # Fetch live similar items from SerpApi shopping API
         outfit_dict = main_outfit.to_dict()
-        similar_outfits = shopping_service.fetch_similar_live_products(outfit_dict, profile, limit=4)
-        return jsonify({'similar': similar_outfits}), 200
+        similar_candidates = shopping_service.fetch_similar_live_products(outfit_dict, profile, limit=8)
+
+        # Authoritative validation and strict exclusion of main product
+        main_key = canonical_product_key(main_outfit)
+        main_url = canonicalize_url(main_outfit.product_url)
+        main_img = extract_image_key(main_outfit.image_url)
+
+        seen_sim_ids = {main_key} if main_key else set()
+        seen_sim_urls = {main_url} if main_url else set()
+        seen_sim_imgs = {main_img} if main_img else set()
+        validated_similar = []
+
+        target_gender = main_outfit.gender or (profile.gender if profile else 'female')
+        target_category = main_outfit.category or ('dress' if target_gender == 'female' else 'clothing')
+        target_occasion = main_outfit.occasion or 'casual'
+
+        for s in similar_candidates:
+            v_res = validate_live_product(
+                candidate=s,
+                profile=profile,
+                requested_gender=target_gender,
+                requested_category=target_category,
+                requested_occasion=target_occasion,
+                seen_identity_keys=seen_sim_ids,
+                seen_urls=seen_sim_urls,
+                seen_images=seen_sim_imgs
+            )
+            if v_res['accepted']:
+                validated_similar.append(v_res['normalized_product'])
+                if len(validated_similar) >= 4:
+                    break
+
+        return jsonify({'similar': validated_similar}), 200
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

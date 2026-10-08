@@ -116,6 +116,63 @@ def clean_retailer_name(raw: Optional[str]) -> str:
     r = re.sub(r'\.(com|in|co\.in|org|net)$', '', r, flags=re.I)
     return r.title() if len(r) > 1 else "Online Store"
 
+def canonical_product_key(product: Any) -> str:
+    """
+    Step 3: One Canonical Product Identity function.
+    Priority:
+    1. external_id (normalized, stripping any 'sim_' prefix variance)
+    2. retailer + canonical product URL
+    3. retailer + product ID
+    4. retailer + normalized brand + normalized title
+    5. normalized brand + normalized title
+    """
+    if hasattr(product, 'to_dict'):
+        p = product.to_dict()
+    elif isinstance(product, dict):
+        p = product
+    else:
+        return ""
+
+    retailer = clean_retailer_name(
+        p.get('retailer') or p.get('store') or p.get('source') or p.get('brand') or ''
+    ).lower()
+
+    # 1. external_id
+    ext_id = str(p.get('external_id') or '').strip().lower()
+    if ext_id and ext_id not in ('none', 'null', ''):
+        # Normalize serpapi_sim_ -> serpapi_
+        norm_ext = re.sub(r'^serpapi_sim_', 'serpapi_', ext_id)
+        if norm_ext and norm_ext != 'serpapi_':
+            return f"ext:{norm_ext}"
+
+    # 2. retailer + canonical product URL
+    raw_url = str(p.get('product_url') or p.get('shopping_url') or p.get('link') or '').strip()
+    canon_u = canonicalize_url(raw_url)
+    if canon_u:
+        return f"url:{retailer}:{canon_u}"
+
+    # 3. retailer + product ID
+    prod_id = str(p.get('product_id') or p.get('id') or '').strip()
+    if prod_id and prod_id not in ('none', 'null', '', '0'):
+        return f"pid:{retailer}:{prod_id}"
+
+    # 4 & 5. retailer + normalized brand + normalized title
+    title = str(p.get('title') or p.get('name') or '').strip()
+    norm_t = normalize_title(title)
+    brand = str(p.get('brand') or '').strip().lower()
+    norm_b = re.sub(r'[^a-z0-9]', '', brand)
+
+    if retailer and norm_b and norm_t:
+        return f"rbt:{retailer}:{norm_b}:{norm_t}"
+    if retailer and norm_t:
+        return f"rt:{retailer}:{norm_t}"
+    if norm_b and norm_t:
+        return f"bt:{norm_b}:{norm_t}"
+    if norm_t:
+        return f"t:{norm_t}"
+
+    return ""
+
 # ---------------------------------------------------------------------------
 # Strict Category Rules (Phase 4)
 # ---------------------------------------------------------------------------
@@ -426,12 +483,15 @@ def validate_live_product(
         if canon_url in seen_urls:
             return {"accepted": False, "reason": "Duplicate canonical product URL", "normalized_product": None}
 
-    # Deterministic Identity Key (Phase 10 & 11)
+    # Deterministic Identity Key (Phase 10 & 11, Step 3 & 4)
     norm_t = normalize_title(title)
     brand_title_key = f"{clean_ret}:{norm_t}"
     identity_key = f"{clean_ret}:{c.get('external_id') or canon_url or norm_t}"
+    canon_prod_key = canonical_product_key(c)
 
     if seen_identity_keys is not None:
+        if canon_prod_key and canon_prod_key in seen_identity_keys:
+            return {"accepted": False, "reason": f"Duplicate canonical product key: {canon_prod_key}", "normalized_product": None}
         if identity_key in seen_identity_keys:
             return {"accepted": False, "reason": "Duplicate product identity key", "normalized_product": None}
         if brand_title_key in seen_identity_keys:
@@ -535,13 +595,19 @@ def validate_live_product(
 
     # Register into tracking sets if provided
     if seen_identity_keys is not None:
+        if canon_prod_key:
+            seen_identity_keys.add(canon_prod_key)
         seen_identity_keys.add(identity_key)
         seen_identity_keys.add(brand_title_key)
         seen_identity_keys.add(norm_t)
     if seen_urls is not None and canon_url:
         seen_urls.add(canon_url)
+    if seen_images is not None and img_key:
+        seen_images.add(img_key)
     if occasion_registry is not None and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):
         assigned_occ = norm_occ or primary_occ
+        if canon_prod_key:
+            occasion_registry[canon_prod_key] = assigned_occ
         occasion_registry[identity_key] = assigned_occ
         if canon_url:
             occasion_registry[canon_url] = assigned_occ
@@ -593,7 +659,8 @@ def validate_live_product(
         'gender_confidence': 1.0,
         'category_confidence': 1.0,
         'image_valid': True,
-        'product_identity_key': identity_key,
+        'product_identity_key': canon_prod_key or identity_key,
+        'canonical_product_key': canon_prod_key or identity_key,
         'canonical_url': canon_url,
     }
 
@@ -613,7 +680,8 @@ def validate_live_product(
     formatted_contract['gender_confidence'] = 1.0
     formatted_contract['category_confidence'] = 1.0
     formatted_contract['image_valid'] = True
-    formatted_contract['product_identity_key'] = identity_key
+    formatted_contract['product_identity_key'] = canon_prod_key or identity_key
+    formatted_contract['canonical_product_key'] = canon_prod_key or identity_key
     formatted_contract['canonical_url'] = canon_url
 
     return {
