@@ -3,17 +3,12 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const PrivateRoute = ({ children }) => {
-  const { isAuthenticated, loading, user } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
+
   const hasToken = !!localStorage.getItem('access_token');
 
-  console.log('[PrivateRoute]', {
-    loading,
-    isAuthenticated,
-    hasUser: !!user,
-    hasToken,
-    path: location.pathname,
-  });
+
 
   if (loading) {
     return (

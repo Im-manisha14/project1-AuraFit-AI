@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { recommendationAPI, userAPI } from '../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiStar, FiTrendingUp, FiCalendar, FiAward, FiUser, FiArrowRight, FiShoppingBag, FiDollarSign, FiTag } from 'react-icons/fi';
+import { FiStar, FiCalendar, FiAward, FiUser, FiArrowRight, FiShoppingBag, FiDollarSign } from 'react-icons/fi';
 import { HiOutlineSparkles } from 'react-icons/hi';
 
 const COLLECTION_META = {
@@ -48,6 +48,43 @@ const SHOP_LABELS = {
   zara:     { label: 'Zara',     color: '#111111' },
 };
 
+const OCCASIONS = [
+  { value: 'casual', label: 'Casual' },
+  { value: 'party', label: 'Party' },
+  { value: 'formal', label: 'Formal' },
+  { value: 'date', label: 'Date' },
+  { value: 'wedding', label: 'Wedding' },
+  { value: 'vacation', label: 'Vacation' },
+  { value: 'brunch', label: 'Brunch' },
+  { value: 'evening', label: 'Evening' },
+  { value: 'cocktail', label: 'Cocktail' },
+  { value: 'traditional', label: 'Traditional' },
+  { value: 'festive', label: 'Festive' },
+  { value: 'office', label: 'Office' },
+  { value: 'dinner', label: 'Dinner' },
+];
+
+const PRICE_RANGES = [
+  { value: 'all', label: 'All Prices' },
+  { value: 'under_500', label: 'Under ₹500' },
+  { value: '500_1000', label: '₹500 – ₹1,000' },
+  { value: '1000_2500', label: '₹1,000 – ₹2,500' },
+  { value: '2500_5000', label: '₹2,500 – ₹5,000' },
+  { value: '5000_10000', label: '₹5,000 – ₹10,000' },
+  { value: 'above_10000', label: '₹10,000+ Luxury' },
+];
+
+const OCCASION_ALIASES = {
+  formal: ['formal'],
+  office: ['office'],
+  party: ['party', 'cocktail'],
+  cocktail: ['cocktail', 'party'],
+  traditional: ['traditional', 'festive'],
+  festive: ['festive', 'traditional'],
+  evening: ['evening', 'dinner'],
+  dinner: ['dinner', 'evening'],
+};
+
 const Recommendations = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -56,73 +93,50 @@ const Recommendations = () => {
   const [rawSimilarRecommendations, setRawSimilarRecommendations] = useState([]);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [priceRange, setPriceRange] = useState('all');
-  const [customMin, setCustomMin] = useState('');
-  const [customMax, setCustomMax] = useState('');
-  const [selectedRetailer, setSelectedRetailer] = useState('all');
   const [loading, setLoading] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileComplete, setProfileComplete] = useState(true);
   const [userGender, setUserGender] = useState('');
   const [filters, setFilters] = useState({
-    occasion: 'casual',
-    season: 'all',
+    occasion: 'formal',
     limit: 25,
   });
   const [collections, setCollections] = useState({});
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [failedImages, setFailedImages] = useState(new Set());
 
-  const matchesPrice = (price, range, minVal, maxVal) => {
-    if (range === 'all') return true;
+  const matchesPrice = (price, range) => {
+    if (!range || range === 'all') return true;
     if (price == null || isNaN(price)) return false;
     const p = Number(price);
-    if (range === 'under_500') return p <= 500;
+    if (range === 'under_500') return p < 500;
     if (range === '500_1000') return p >= 500 && p <= 1000;
-    if (range === '1000_2000') return p >= 1000 && p <= 2000;
-    if (range === '1000_2500') return p >= 1000 && p <= 2500;
-    if (range === '2000_3000') return p >= 2000 && p <= 3000;
-    if (range === '2500_5000') return p >= 2500 && p <= 5000;
-    if (range === '3000_5000') return p >= 3000 && p <= 5000;
-    if (range === '5000_10000') return p >= 5000 && p <= 10000;
-    if (range === '5000_plus') return p >= 5000;
-    if (range === 'above_10000') return p >= 10000;
-    if (range === 'custom') {
-      const min = minVal !== '' && !isNaN(minVal) ? Number(minVal) : null;
-      const max = maxVal !== '' && !isNaN(maxVal) ? Number(maxVal) : null;
-      if (min !== null && p < min) return false;
-      if (max !== null && p > max) return false;
-      return true;
-    }
+    if (range === '1000_2500') return p > 1000 && p <= 2500;
+    if (range === '2500_5000') return p > 2500 && p <= 5000;
+    if (range === '5000_10000') return p > 5000 && p <= 10000;
+    if (range === 'above_10000' || range === '10000_plus') return p > 10000;
     return true;
   };
-
-  const matchesRetailer = (outfitRetailer, selRetailer) => {
-    if (!selRetailer || selRetailer === 'all') return true;
-    const r = (outfitRetailer || '').toLowerCase();
-    return r.includes(selRetailer.toLowerCase());
-  };
-
-  const availableRetailers = useMemo(() => {
-    const set = new Set();
-    rawRecommendations.forEach(rec => {
-      const r = rec.outfit?.retailer || rec.outfit?.store || rec.outfit?.brand;
-      if (r && r.trim() && r.toLowerCase() !== 'aurafit official') {
-        set.add(r.trim());
-      }
-    });
-    return Array.from(set).sort();
-  }, [rawRecommendations]);
 
   const recommendations = useMemo(() => {
     const seenImages = new Set();
     const seenUrls = new Set();
+    const targetOcc = (filters.occasion || '').toLowerCase().trim();
+    const validOccs = OCCASION_ALIASES[targetOcc] || (targetOcc ? [targetOcc] : []);
+
     return rawRecommendations.filter(rec => {
       const outfit = rec.outfit;
       if (!outfit) return false;
-      const pOk = matchesPrice(outfit.price, priceRange, customMin, customMax);
-      const r = outfit.retailer || outfit.store || outfit.brand;
-      const retOk = matchesRetailer(r, selectedRetailer);
-      if (!pOk || !retOk) return false;
+      const pOk = matchesPrice(outfit.price, priceRange);
+      if (!pOk) return false;
+
+      // Hard occasion filter in UI
+      if (targetOcc && validOccs.length > 0) {
+        const itemOcc = (outfit.occasion || outfit.primary_occasion || '').toLowerCase().trim();
+        if (itemOcc && !validOccs.includes(itemOcc)) {
+          return false;
+        }
+      }
 
       // Defensive image & product URL deduplication
       const img = (outfit.image_url || outfit.image || '').trim();
@@ -138,26 +152,37 @@ const Recommendations = () => {
       }
       return true;
     });
-  }, [rawRecommendations, priceRange, customMin, customMax, selectedRetailer]);
+  }, [rawRecommendations, priceRange, filters.occasion]);
 
   const similarRecommendations = useMemo(() => {
     const seenImages = new Set();
     const seenUrls = new Set();
-    // Exclude images already present in main recommendations
+    const targetOcc = (filters.occasion || '').toLowerCase().trim();
+    const validOccs = OCCASION_ALIASES[targetOcc] || (targetOcc ? [targetOcc] : []);
+
+    // Exclude images & URLs already present in main recommendations
     recommendations.forEach(rec => {
       const img = (rec.outfit?.image_url || rec.outfit?.image || '').trim();
       if (img) {
         const imgKey = img.includes('q=tbn:') ? img.split('q=tbn:')[1].split('&')[0] : img.split('?')[0];
         seenImages.add(imgKey);
       }
+      const directUrl = (rec.outfit?.product_url || rec.outfit?.shopping_url || '').split('?')[0].trim();
+      if (directUrl) seenUrls.add(directUrl);
     });
 
     return rawSimilarRecommendations.filter(outfit => {
       if (!outfit) return false;
-      const pOk = matchesPrice(outfit.price, priceRange, customMin, customMax);
-      const r = outfit.retailer || outfit.store || outfit.brand;
-      const retOk = matchesRetailer(r, selectedRetailer);
-      if (!pOk || !retOk) return false;
+      const pOk = matchesPrice(outfit.price, priceRange);
+      if (!pOk) return false;
+
+      // Hard occasion filter in UI
+      if (targetOcc) {
+        const itemOcc = (outfit.occasion || outfit.primary_occasion || '').toLowerCase().trim();
+        if (itemOcc && !validOccs.includes(itemOcc)) {
+          return false;
+        }
+      }
 
       const img = (outfit.image_url || outfit.image || '').trim();
       const directUrl = (outfit.product_url || outfit.shopping_url || '').split('?')[0].trim();
@@ -172,7 +197,7 @@ const Recommendations = () => {
       }
       return true;
     });
-  }, [rawSimilarRecommendations, recommendations, priceRange, customMin, customMax, selectedRetailer]);
+  }, [rawSimilarRecommendations, recommendations, priceRange, filters.occasion]);
 
 
   useEffect(() => {
@@ -180,6 +205,7 @@ const Recommendations = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // eslint-disable-next-line no-unused-vars
   const loadCollections = async (seasonOverride) => {
     setCollectionsLoading(true);
     try {
@@ -230,17 +256,16 @@ const Recommendations = () => {
         setLoading(true);
         try {
           const response = await recommendationAPI.generate({ 
-            occasion: 'casual', 
-            season: 'all', 
+            occasion: filters.occasion || 'formal', 
             gender: userGen || undefined,
             category: userGen === 'male' ? 'clothing' : 'dress',
-            limit: 25, 
-            results: 25 
+            limit: Number(filters.limit || 25), 
+            results: Number(filters.limit || 25),
+            price_range: priceRange !== 'all' ? priceRange : undefined
           });
           setRawRecommendations(response.data.recommendations || []);
           setRawSimilarRecommendations(response.data.similar_recommendations || []);
           setHasGenerated(true);
-          loadCollections();
         } catch (err) {
           console.error('Auto-generate error:', err);
         } finally {
@@ -263,15 +288,19 @@ const Recommendations = () => {
       ...prev,
       [name]: value,
     }));
-    // If occasion or season changed, clear stale recommendations immediately
-    if (name === 'occasion' || name === 'season') {
-      setRawRecommendations([]);
-      setRawSimilarRecommendations([]);
-      setHasGenerated(false);
-      if (name === 'season') {
-        loadCollections(value);
-      }
-    }
+    // Clear stale recommendations immediately on any filter change
+    setRawRecommendations([]);
+    setRawSimilarRecommendations([]);
+    setHasGenerated(false);
+  };
+
+  const handlePriceRangeChange = (e) => {
+    const val = e.target.value;
+    setPriceRange(val);
+    // Clear stale recommendations immediately on price range change
+    setRawRecommendations([]);
+    setRawSimilarRecommendations([]);
+    setHasGenerated(false);
   };
 
   const generateRecommendations = async () => {
@@ -286,24 +315,21 @@ const Recommendations = () => {
     setLoading(true);
     try {
       const payload = {
-        ...filters,
+        occasion: filters.occasion || 'formal',
         gender: userGender || undefined,
         category: userGender === 'male' ? 'clothing' : 'dress',
+        limit: Number(filters.limit || 25),
         results: Number(filters.limit || 25),
-        price_range: priceRange !== 'custom' ? priceRange : undefined,
-        min_price: priceRange === 'custom' && customMin !== '' ? Number(customMin) : undefined,
-        max_price: priceRange === 'custom' && customMax !== '' ? Number(customMax) : undefined,
-        retailer: selectedRetailer !== 'all' ? selectedRetailer : undefined,
+        price_range: priceRange !== 'all' ? priceRange : undefined,
       };
       const response = await recommendationAPI.generate(payload);
       setRawRecommendations(response.data.recommendations || []);
       setRawSimilarRecommendations(response.data.similar_recommendations || []);
       setHasGenerated(true);
-      loadCollections();
     } catch (error) {
       console.error('Error generating recommendations:', error);
       // Only show profile modal if the server says profile is incomplete (400)
-      if (error.response?.status === 400) {
+      if (error.response?.status === 400 && error.response?.data?.error?.includes('profile')) {
         setShowProfileModal(true);
       }
     } finally {
@@ -398,35 +424,31 @@ const Recommendations = () => {
                 <span>Occasion</span>
               </label>
               <select
+                id="occasion-filter"
                 name="occasion"
                 value={filters.occasion}
                 onChange={handleFilterChange}
                 className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
               >
-                <option value="casual">Casual</option>
-                <option value="formal">Formal</option>
-                <option value="party">Party</option>
-                <option value="work">Work</option>
-                <option value="gym">Gym</option>
-                <option value="date">Date</option>
+                {OCCASIONS.map(occ => (
+                  <option key={occ.value} value={occ.value}>{occ.label}</option>
+                ))}
               </select>
             </div>
             <div>
               <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
-                <FiTrendingUp className="text-amber-600 text-sm sm:text-base" />
-                <span>Season</span>
+                <FiDollarSign className="text-amber-600 text-sm sm:text-base" />
+                <span>Price Range</span>
               </label>
               <select
-                name="season"
-                value={filters.season}
-                onChange={handleFilterChange}
+                id="price-range-filter"
+                value={priceRange}
+                onChange={handlePriceRangeChange}
                 className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
               >
-                <option value="all">All Seasons</option>
-                <option value="summer">Summer</option>
-                <option value="winter">Winter</option>
-                <option value="spring">Spring</option>
-                <option value="fall">Fall</option>
+                {PRICE_RANGES.map(pr => (
+                  <option key={pr.value} value={pr.value}>{pr.label}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -435,6 +457,7 @@ const Recommendations = () => {
                 <span>Results</span>
               </label>
               <select
+                id="results-filter"
                 name="limit"
                 value={filters.limit}
                 onChange={handleFilterChange}
@@ -447,94 +470,6 @@ const Recommendations = () => {
                 <option value="40">40</option>
               </select>
             </div>
-          </div>
-
-          {/* Shopping Price & Retailer Filters */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-5 md:gap-6 mb-6 sm:mb-8 pt-4 border-t border-gray-100">
-            <div>
-              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
-                <FiDollarSign className="text-amber-600 text-sm sm:text-base" />
-                <span>Price Range</span>
-              </label>
-              <select
-                id="price-range-filter"
-                value={priceRange}
-                onChange={(e) => setPriceRange(e.target.value)}
-                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
-              >
-                <option value="all">All Prices</option>
-                <option value="under_500">Under ₹500</option>
-                <option value="500_1000">₹500 – ₹1,000</option>
-                <option value="1000_2000">₹1,000 – ₹2,000</option>
-                <option value="1000_2500">₹1,000 – ₹2,500</option>
-                <option value="2000_3000">₹2,000 – ₹3,000</option>
-                <option value="2500_5000">₹2,500 – ₹5,000</option>
-                <option value="3000_5000">₹3,000 – ₹5,000</option>
-                <option value="5000_10000">₹5,000 – ₹10,000</option>
-                <option value="5000_plus">₹5,000+</option>
-                <option value="above_10000">Above ₹10,000</option>
-                <option value="custom">Custom Price Range</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase flex items-center space-x-1 sm:space-x-2">
-                <FiTag className="text-amber-600 text-sm sm:text-base" />
-                <span>Retailer</span>
-              </label>
-              <select
-                id="retailer-filter"
-                value={selectedRetailer}
-                onChange={(e) => setSelectedRetailer(e.target.value)}
-                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
-              >
-                <option value="all">All Retailers</option>
-                {availableRetailers.map((ret) => (
-                  <option key={ret} value={ret}>
-                    {ret}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {priceRange === 'custom' ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase truncate">
-                    Min Price (₹)
-                  </label>
-                  <input
-                    type="number"
-                    id="min-price-input"
-                    placeholder="Min ₹"
-                    value={customMin}
-                    onChange={(e) => setCustomMin(e.target.value)}
-                    className="w-full px-3 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-900 font-medium mb-2 sm:mb-3 text-xs sm:text-sm tracking-wide uppercase truncate">
-                    Max Price (₹)
-                  </label>
-                  <input
-                    type="number"
-                    id="max-price-input"
-                    placeholder="Max ₹"
-                    value={customMax}
-                    onChange={(e) => setCustomMax(e.target.value)}
-                    className="w-full px-3 py-2.5 sm:py-3 border border-gray-200 focus:outline-none focus:border-amber-600 transition-colors bg-gray-50 text-gray-900 text-sm"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-end pb-2 text-xs text-gray-500 font-light">
-                {rawRecommendations.length > 0 && (
-                  <span>
-                    Showing <strong className="font-semibold text-gray-800">{recommendations.length}</strong> of {rawRecommendations.length} live products
-                  </span>
-                )}
-              </div>
-            )}
           </div>
           <motion.button
             whileHover={{ scale: 1.02 }}
@@ -829,7 +764,7 @@ const Recommendations = () => {
             <div className="flex items-center mb-8">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
-                  Similar Real Products
+                  Similar {filters.occasion ? filters.occasion.charAt(0).toUpperCase() + filters.occasion.slice(1) : ''} Real Products
                 </h2>
                 <p className="text-sm text-gray-500 mt-0.5">
                   Curated live from Google Shopping matching your occasion and style
@@ -906,13 +841,13 @@ const Recommendations = () => {
             className="bg-white border border-gray-200 p-16 text-center"
           >
             <HiOutlineSparkles className="text-7xl text-amber-500 mx-auto mb-6" />
-            {rawRecommendations.length > 0 && (priceRange !== 'all' || customMin || customMax) && selectedRetailer === 'all' ? (
+            {rawRecommendations.length > 0 && priceRange !== 'all' ? (
               <>
                 <h3 className="text-2xl font-bold text-gray-900 mb-3 tracking-tight">
                   No live products found in this price range.
                 </h3>
                 <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
-                  Try increasing your price range.
+                  Try widening your price range.
                 </p>
               </>
             ) : hasGenerated ? (
@@ -921,7 +856,7 @@ const Recommendations = () => {
                   No live products match your selected filters.
                 </h3>
                 <p className="text-gray-600 font-light leading-relaxed max-w-md mx-auto">
-                  Try widening your price range or changing the retailer.
+                  Try changing your price range or occasion.
                 </p>
               </>
             ) : (
@@ -937,8 +872,8 @@ const Recommendations = () => {
           </motion.div>
         )}
 
-        {/* Collections Section */}
-        {(collectionsLoading || Object.keys(collections).length > 0) && (
+        {/* Style Collections hidden on recommendation results page per production spec */}
+        {false && (collectionsLoading || Object.keys(collections).length > 0) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

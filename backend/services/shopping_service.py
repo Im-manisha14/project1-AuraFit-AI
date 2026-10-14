@@ -1,6 +1,17 @@
 import os
+import sys
+import io
+
+if sys.platform == 'win32':
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 import re
 import requests
+
 import urllib.parse
 import hashlib
 from datetime import datetime, timedelta
@@ -1349,21 +1360,27 @@ class SerpApiShoppingService:
                 ]
             passes.append([q for q in p5 if q])
 
-            # PASS 6: Additional colors from skin-tone palette (broader fallback)
-            p6 = [f"women {col} dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
+            # PASS 6: Additional colors from skin-tone palette with occasion preserved
+            p6 = [f"women {col} {norm_occ_key} dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
             passes.append([q for q in p6 if q])
 
-            # PASS 7: Traditional/ethnic fallback (always valid for dresses)
-            p7 = [
-                f"women ethnic anarkali dress {norm_occ_key} {p_cue}".strip(),
-                f"women kurti dress {norm_occ_key} {p_cue}".strip()
-            ]
+            # PASS 7: Occasion-specific styling fallback
+            if norm_occ_key in ('traditional', 'festive'):
+                p7 = [
+                    f"women ethnic anarkali dress {norm_occ_key} {p_cue}".strip(),
+                    f"women kurti dress {norm_occ_key} {p_cue}".strip()
+                ]
+            else:
+                p7 = [
+                    f"women elegant {norm_occ_key} dress {p_cue}".strip(),
+                    f"women designer {norm_occ_key} dress {p_cue}".strip()
+                ]
             passes.append([q for q in p7 if q])
 
-            # PASS 8: Broad dress fallback (last resort)
+            # PASS 8: Occasion collection fallback
             p8 = [
-                f"women dress online india {p_cue}".strip(),
-                f"women stylish dress {p_cue}".strip()
+                f"women {norm_occ_key} dress online india {p_cue}".strip(),
+                f"women {norm_occ_key} dress collection {p_cue}".strip()
             ]
             passes.append([q for q in p8 if q])
 
@@ -1447,15 +1464,22 @@ class SerpApiShoppingService:
 
         broadening = []
         if norm_gender == 'female':
-            if occ_term and season_term:
-                broadening.append(f"women {occ_term} dress {season_term} {p_cue}".strip())
-            if season_term:
-                broadening.append(f"women dress {season_term} {p_cue}".strip())
-            broadening.append(f"women dress online india {p_cue}".strip())
+            if occ_term:
+                if season_term:
+                    broadening.append(f"women {occ_term} dress {season_term} {p_cue}".strip())
+                broadening.append(f"women {occ_term} dress {p_cue}".strip())
+                broadening.append(f"women elegant {occ_term} dress {p_cue}".strip())
+                broadening.append(f"women {occ_term} dress online india {p_cue}".strip())
+            else:
+                broadening.append(f"women dress {p_cue}".strip())
         else:
-            if occ_term and season_term:
-                broadening.append(f"men {occ_term} clothing {season_term} {p_cue}".strip())
-            broadening.append(f"men casual clothing {p_cue}".strip())
+            if occ_term:
+                if season_term:
+                    broadening.append(f"men {occ_term} clothing {season_term} {p_cue}".strip())
+                broadening.append(f"men {occ_term} shirt {p_cue}".strip())
+                broadening.append(f"men {occ_term} clothing {p_cue}".strip())
+            else:
+                broadening.append(f"men casual clothing {p_cue}".strip())
         
         seen = set()
         deduped = []
@@ -1667,21 +1691,19 @@ class SerpApiShoppingService:
                     log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: {occ_result.reason}", canonical_product_id=canonical_id)
                     continue
 
-                # Phase 6 & Phase 5: Primary Occasion Exclusivity
-                if occasion.lower() in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports'):
-                    if primary_occ != occasion.lower():
-                        if primary_occ == 'casual' and occasion.lower() in ('party', 'formal', 'office', 'wedding'):
-                            stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
-                            log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Casual dress cannot appear under {occasion} (primary={primary_occ})", canonical_product_id=canonical_id)
-                            continue
-                        if primary_occ in ('party', 'cocktail') and occasion.lower() in ('casual', 'formal', 'office', 'sports'):
-                            stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
-                            log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Party dress cannot appear under {occasion} (primary={primary_occ})", canonical_product_id=canonical_id)
-                            continue
-                        if best_score >= 8.0 and best_score > (occ_result.confidence * 16.0 * 1.05):
-                            stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
-                            log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Primary occasion {primary_occ} score {best_score:.1f} dominates {occasion}", canonical_product_id=canonical_id)
-                            continue
+                # Hard Occasion Exclusivity: Distinct occasions cannot cross-contaminate
+                req_occ = occasion.lower()
+                if req_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports', 'date', 'brunch', 'dinner', 'cocktail', 'traditional', 'festive'):
+                    alias_groups = [
+                        {'party', 'cocktail'},
+                        {'traditional', 'festive'},
+                        {'evening', 'dinner'},
+                    ]
+                    is_alias = any(req_occ in g and primary_occ in g for g in alias_groups)
+                    if primary_occ != req_occ and not is_alias:
+                        stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
+                        log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Primary occasion '{primary_occ}' does not match requested '{req_occ}'", canonical_product_id=canonical_id)
+                        continue
 
             # 4c. Season classification (post-retrieval validation)
             if season and season.lower() not in ('all', ''):
@@ -2016,6 +2038,12 @@ class SerpApiShoppingService:
             print(f"[ShoppingService] Live queries yielded {len(all_candidates)}/{target_limit}. Supplementing from persisted live SerpApi items under identical strict filters...")
             from models.outfit import Outfit
             db_query = Outfit.query.filter(Outfit.source.like('serpapi%'), Outfit.in_stock == True)
+            if norm_gender:
+                db_query = db_query.filter(Outfit.gender == norm_gender)
+            if occasion:
+                db_query = db_query.filter(Outfit.occasion == occasion.lower())
+            if target_category:
+                db_query = db_query.filter(Outfit.category.ilike(f"%{target_category}%"))
             if req_ret:
                 db_query = db_query.filter(Outfit.store.ilike(f"%{req_ret}%"))
             live_db_outfits = db_query.all()

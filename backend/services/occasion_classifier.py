@@ -64,8 +64,11 @@ OCCASION_TAXONOMY = {
             ("sequin", "dress"), ("party", "mini"), ("glitter", "dress"),
             ("metallic", "dress"), ("club", "dress"), ("cocktail", "dress"),
         ],
-        "hard_rejects": ["sleepwear", "pyjama", "nightwear", "office uniform",
-                         "anarkali", "kurti", "t-shirt dress", "daily casual", "linen tiered"],
+        "hard_rejects": [
+            "sleepwear", "pyjama", "nightwear", "office uniform", "workwear",
+            "anarkali", "kurti", "saree", "lehenga", "salwar", "t-shirt dress",
+            "daily casual", "linen tiered", "formal sheath", "casual cotton"
+        ],
         "threshold": 0.45,
     },
     "casual": {
@@ -81,12 +84,16 @@ OCCASION_TAXONOMY = {
             ("sequin", -12), ("glitter", -12), ("metallic", -10), ("cocktail", -10),
             ("party", -10), ("evening gown", -12), ("ball gown", -12), ("formal gown", -12),
             ("clubwear", -12), ("nightclub", -12), ("backless sexy", -10),
+            ("anarkali", -10), ("saree", -10), ("lehenga", -10), ("formal sheath", -10),
         ],
         "strong_combos": [
             ("cotton", "casual"), ("denim", "dress"), ("everyday", "dress"),
             ("t-shirt", "dress"), ("shirt", "dress"),
         ],
-        "hard_rejects": ["sequin", "glitter", "metallic", "evening gown", "ball gown", "clubwear", "nightwear"],
+        "hard_rejects": [
+            "sequin", "glitter", "metallic", "evening gown", "ball gown", "clubwear",
+            "nightwear", "anarkali", "saree", "lehenga", "formal gown", "formal sheath", "black tie"
+        ],
         "threshold": 0.45,
     },
     "date": {
@@ -124,26 +131,36 @@ OCCASION_TAXONOMY = {
             ("wedding", "gown"), ("anarkali", "gown"), ("zari", "saree"),
             ("embroidered", "gown"), ("bridesmaid", "dress"),
         ],
-        "hard_rejects": ["mini dress", "short dress", "clubwear", "nightwear", "gymwear", "t-shirt dress"],
+        "hard_rejects": ["mini dress", "short dress", "clubwear", "nightwear", "gymwear", "t-shirt dress", "casual", "daily wear"],
         "threshold": 0.45,
     },
     "formal": {
         "aliases": ["formal", "formal wear", "occasion", "gala", "black tie",
-                    "evening gown", "cocktail party"],
+                    "evening gown", "cocktail party", "office formal", "business formal"],
         "positive": [
-            ("formal", 10), ("formal wear", 10), ("evening gown", 12), ("gala", 10),
-            ("black tie", 12), ("sheath dress", 10), ("tailored formal", 10),
+            ("formal", 10), ("formal wear", 10), ("formal dress", 12), ("evening gown", 12),
+            ("gala", 10), ("black tie", 12), ("sheath dress", 10), ("tailored formal", 10),
             ("floor length gown", 10), ("sophisticated gown", 10), ("classic black dress", 8),
+            ("blazer dress", 10), ("pencil dress", 10), ("formal midi", 10), ("workwear", 9),
+            ("professional", 8), ("corporate", 8), ("solid formal", 9),
         ],
         "negative": [
-            ("mini dress", -10), ("clubwear", -12), ("nightclub", -12), ("casual", -10),
-            ("sundress", -10), ("t-shirt", -12), ("beach", -10), ("vacation", -10),
+            ("casual", -12), ("daily wear", -12), ("regular fit", -10), ("everyday", -10),
+            ("t-shirt", -12), ("beach", -10), ("vacation", -10), ("resort", -10), ("boho", -10),
+            ("mini dress", -10), ("clubwear", -12), ("nightclub", -12), ("party", -10),
+            ("sequin", -12), ("glitter", -12), ("shimmer", -10),
+            ("anarkali", -12), ("kurti", -12), ("saree", -12), ("lehenga", -12), ("salwar", -12), ("ethnic", -10),
         ],
         "strong_combos": [
             ("formal", "gown"), ("evening", "gown"), ("sheath", "dress"),
-            ("black tie", "dress"), ("formal", "sheath"),
+            ("black tie", "dress"), ("formal", "sheath"), ("formal", "dress"),
+            ("blazer", "dress"), ("tailored", "dress"),
         ],
-        "hard_rejects": ["sleepwear", "nightwear", "pyjama", "gymwear", "mini dress", "clubwear", "t-shirt dress", "sundress"],
+        "hard_rejects": [
+            "sleepwear", "nightwear", "pyjama", "gymwear", "mini dress", "clubwear",
+            "t-shirt dress", "sundress", "beachwear", "casual", "daily wear", "relaxed fit",
+            "anarkali", "kurti", "saree", "lehenga", "salwar", "sequin", "glitter", "shimmer"
+        ],
         "threshold": 0.45,
     },
     "office": {

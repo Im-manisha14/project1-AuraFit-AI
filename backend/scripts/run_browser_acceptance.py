@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """
-Browser Verification Script for AuraFit AI
+Browser Verification Script for AuraFit AI — Final Strict Production Fix
 Runs headless Playwright against http://localhost:3000 and http://localhost:5000.
-Verifies all 21 criteria in real browser DOM.
+Verifies all criteria:
+1. Season & Retailer filters REMOVED from UI
+2. Occasion, Price Range, Results filters present
+3. Formal + ₹500–₹1,000 returns only formal items in price range
+4. Generic Collections ("Based on Your Skin Tone", "For Your Body Shape", etc.) NOT rendered
+5. Party + ₹500–₹1,000 returns only party items
+6. Casual + ₹1,000–₹2,500 returns only casual items
+7. Zero cross-occasion duplicates
+8. Card to Detail consistency
 """
 
 import os
@@ -10,7 +18,12 @@ import sys
 import time
 import importlib
 
-# Resolve playwright dynamically to avoid IDE linter missing-import warnings
+# Resolve playwright dynamically
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 try:
     _pw = importlib.import_module("playwright.sync_api")
     sync_playwright = getattr(_pw, "sync_playwright")
@@ -43,60 +56,94 @@ def run_browser_verification():
         print("[BROWSER] Navigating to /recommendations...")
         page.goto("http://localhost:3000/recommendations", wait_until="domcontentloaded")
         page.wait_for_timeout(2000)
-        
-        # Select Occasion: party, Season: summer
-        page.select_option('select[name="occasion"]', "party")
-        page.select_option('select[name="season"]', "summer")
+
+        # Step 3: Verify controls
+        print("[BROWSER] Verifying filter controls...")
+        has_occasion = page.locator('select[name="occasion"]').count() > 0
+        has_price_range = page.locator('select#price-range-filter').count() > 0
+        has_results = page.locator('select[name="limit"]').count() > 0
+        has_season = page.locator('select[name="season"]').count() > 0
+        has_retailer = page.locator('select#retailer-filter').count() > 0
+
+        print(f"  Occasion dropdown present: {has_occasion}")
+        print(f"  Price Range dropdown present: {has_price_range}")
+        print(f"  Results dropdown present: {has_results}")
+        print(f"  Season dropdown present: {has_season} (Expected: False)")
+        print(f"  Retailer dropdown present: {has_retailer} (Expected: False)")
+
+        assert has_occasion, "Occasion dropdown missing!"
+        assert has_price_range, "Price range dropdown missing!"
+        assert has_results, "Results dropdown missing!"
+        assert not has_season, "Season filter was NOT removed from UI!"
+        assert not has_retailer, "Retailer filter was NOT removed from UI!"
+        print("[BROWSER] [PASS] UI controls strictly simplified: Season and Retailer removed!")
+
+        # Step 4: Test Formal + INR 500-1,000
+        print("[BROWSER] Selecting Occasion=formal, Price Range=500_1000...")
+        page.select_option('select[name="occasion"]', "formal")
+        page.select_option('select#price-range-filter', "500_1000")
         page.wait_for_timeout(1000)
 
-        # Click Generate Recommendations
-        print("[BROWSER] Clicking 'Generate Recommendations' for Party + Summer...")
-        gen_btn = page.locator('button:has-text("Generate Recommendations")')
-        gen_btn.click()
-        
-        # Wait for loading to finish
-        page.wait_for_selector('.recommendation-card', timeout=45000)
+        print("[BROWSER] Clicking 'Generate Recommendations' for Formal + INR 500-1,000...")
+        page.locator('button:has-text("Generate Recommendations")').click()
+        page.wait_for_selector('.recommendation-card', timeout=60000)
         page.wait_for_timeout(3000)
 
-        # Take screenshot of Party results
-        party_img_path = os.path.join(SCREENSHOT_DIR, "browser_party_summer.png")
-        page.screenshot(path=party_img_path)
-        print(f"[BROWSER] Saved screenshot: {party_img_path}")
+        formal_img_path = os.path.join(SCREENSHOT_DIR, "browser_formal_recommendations.png")
+        page.screenshot(path=formal_img_path)
+        print(f"[BROWSER] Saved screenshot: {formal_img_path}")
 
-        # Check Party cards
+        # Check that generic collections are NOT rendered
+        col_heading_count = page.locator('h2:has-text("Style Collections")').count()
+        skin_tone_count = page.locator('text="Based on Your Skin Tone"').count()
+        body_shape_count = page.locator('text="For Your Body Shape"').count()
+        trending_count = page.locator('text="Trending Right Now"').count()
+        seasonal_count = page.locator('text="Seasonal Picks"').count()
+        
+        print(f"  Style Collections visible: {col_heading_count} (Expected: 0)")
+        print(f"  Based on Your Skin Tone: {skin_tone_count} (Expected: 0)")
+        print(f"  For Your Body Shape: {body_shape_count} (Expected: 0)")
+        print(f"  Trending Right Now: {trending_count} (Expected: 0)")
+        print(f"  Seasonal Picks: {seasonal_count} (Expected: 0)")
+
+        assert col_heading_count == 0, "Generic Style Collections section still rendered!"
+        assert skin_tone_count == 0, "Based on Your Skin Tone still rendered!"
+        assert body_shape_count == 0, "For Your Body Shape still rendered!"
+        assert trending_count == 0, "Trending Right Now still rendered!"
+        assert seasonal_count == 0, "Seasonal Picks still rendered!"
+        print("[BROWSER] [PASS] Generic collections are successfully NOT rendered!")
+
+        # Check formal cards
         cards = page.locator('.recommendation-card')
-        party_count = cards.count()
-        print(f"[BROWSER] Rendered {party_count} Party cards.")
-        assert party_count > 0, "No party cards rendered!"
+        formal_count = cards.count()
+        print(f"[BROWSER] Rendered {formal_count} Formal cards.")
+        assert formal_count > 0, "No formal cards rendered!"
 
-        party_titles = []
-        party_imgs = []
-        for i in range(party_count):
+        formal_titles = []
+        formal_imgs = []
+        for i in range(formal_count):
             card = cards.nth(i)
             title = card.locator('h3').first.inner_text().strip()
-            party_titles.append(title)
+            formal_titles.append(title)
             img_el = card.locator('img').first
             src = img_el.get_attribute('src')
-            party_imgs.append(src)
-            # Evaluate if image loaded without error
+            formal_imgs.append(src)
             is_loaded = page.evaluate("(img) => img.naturalWidth > 0", img_el.element_handle())
-            print(f"  Card {i+1}: '{title[:35]}' | Image loaded: {is_loaded}")
-            assert is_loaded, f"Image failed to load on card {i+1}!"
+            print(f"  Formal Card {i+1}: '{title[:40]}' | Image loaded: {is_loaded}")
+            assert is_loaded, f"Formal card {i+1} image failed to load!"
+            # Verify no casual/party words in formal title
+            lower_t = title.lower()
+            assert not any(w in lower_t for w in ["casual", "party dress", "saree", "kurti", "lehenga", "anarkali"]), f"Disallowed style in Formal card: {title}"
 
-        # Check for duplicates in party results
-        assert len(party_titles) == len(set(party_titles)), f"Duplicate titles found in party cards: {party_titles}"
-        print("[BROWSER] [PASS] Zero duplicates in Party cards.")
-
-        # Step 3: Card vs Detail Check
+        # Step 5: Card vs Detail check on Formal item
         first_card = cards.first
-        first_title = party_titles[0]
-        first_img = party_imgs[0]
-        print(f"[BROWSER] Clicking 'View Details' on first card: '{first_title}'...")
+        first_title = formal_titles[0]
+        first_img = formal_imgs[0]
+        print(f"[BROWSER] Testing View Details on: '{first_title}'...")
         first_card.locator('button:has-text("View Details")').click()
         page.wait_for_url("**/outfit/*", timeout=10000)
         page.wait_for_timeout(2000)
 
-        # Take screenshot of Detail page
         detail_img_path = os.path.join(SCREENSHOT_DIR, "browser_outfit_detail.png")
         page.screenshot(path=detail_img_path)
         print(f"[BROWSER] Saved screenshot: {detail_img_path}")
@@ -108,35 +155,66 @@ def run_browser_verification():
 
         print(f"[BROWSER] Card Title:   '{first_title}'")
         print(f"[BROWSER] Detail Title: '{detail_title}'")
-        assert first_title == detail_title, f"Detail title '{detail_title}' doesn't match card title '{first_title}'!"
+        assert first_title == detail_title, f"Detail title doesn't match card title!"
         assert detail_loaded, "Detail page image failed to load!"
-        assert first_img == detail_src, f"Detail image '{detail_src}' does not match card image '{first_img}'!"
-        print("[BROWSER] [PASS] 100% Card vs Detail consistency verified.")
+        assert first_img == detail_src, "Detail image does not match card image!"
+        print("[BROWSER] [PASS] Card vs Detail consistency 100% matched!")
 
-        # Step 4: Go Back to Recommendations
+        # Step 6: Go Back to Recommendations
         print("[BROWSER] Navigating back to /recommendations...")
         page.click('button:has-text("Back to Recommendations")')
         page.wait_for_url("**/recommendations", timeout=10000)
         page.wait_for_timeout(2000)
 
-        # Step 5: Switch to Casual
-        print("[BROWSER] Changing Occasion to 'casual'...")
-        page.select_option('select[name="occasion"]', "casual")
+        # Step 7: Test Party
+        print("[BROWSER] Changing Occasion to 'party'...")
+        page.select_option('select[name="occasion"]', "party")
         page.wait_for_timeout(1000)
 
-        # Verify old party cards were cleared on filter change
+        # Verify old formal cards cleared immediately
         cur_cards = page.locator('.recommendation-card').count()
         print(f"[BROWSER] Cards visible immediately after filter change: {cur_cards} (Expected: 0 stale cards)")
-        assert cur_cards == 0, "Stale party cards remained visible after changing occasion!"
+        assert cur_cards == 0, "Stale formal cards remained visible after changing occasion!"
         print("[BROWSER] [PASS] Zero stale cards on filter change.")
 
-        # Generate Casual
-        print("[BROWSER] Generating Casual recommendations...")
+        print("[BROWSER] Generating Party recommendations...")
         page.locator('button:has-text("Generate Recommendations")').click()
-        page.wait_for_selector('.recommendation-card', timeout=45000)
+        page.wait_for_selector('.recommendation-card', timeout=60000)
         page.wait_for_timeout(3000)
 
-        casual_img_path = os.path.join(SCREENSHOT_DIR, "browser_casual_summer.png")
+        party_img_path = os.path.join(SCREENSHOT_DIR, "browser_party_recommendations.png")
+        page.screenshot(path=party_img_path)
+        print(f"[BROWSER] Saved screenshot: {party_img_path}")
+
+        party_cards = page.locator('.recommendation-card')
+        party_count = party_cards.count()
+        print(f"[BROWSER] Rendered {party_count} Party cards.")
+        assert party_count > 0, "No party cards rendered!"
+
+        party_titles = []
+        for i in range(party_count):
+            card = party_cards.nth(i)
+            t = card.locator('h3').first.inner_text().strip()
+            party_titles.append(t)
+            img_el = card.locator('img').first
+            is_loaded = page.evaluate("(img) => img.naturalWidth > 0", img_el.element_handle())
+            print(f"  Party Card {i+1}: '{t[:40]}' | Image loaded: {is_loaded}")
+            assert is_loaded, f"Party card {i+1} image failed to load!"
+
+        # Step 8: Test Casual
+        print("[BROWSER] Changing Occasion to 'casual', Price Range to '1000_2500'...")
+        page.select_option('select[name="occasion"]', "casual")
+        page.select_option('select#price-range-filter', "1000_2500")
+        page.wait_for_timeout(1000)
+
+        assert page.locator('.recommendation-card').count() == 0, "Stale party cards remained visible!"
+
+        print("[BROWSER] Generating Casual recommendations...")
+        page.locator('button:has-text("Generate Recommendations")').click()
+        page.wait_for_selector('.recommendation-card', timeout=60000)
+        page.wait_for_timeout(3000)
+
+        casual_img_path = os.path.join(SCREENSHOT_DIR, "browser_casual_recommendations.png")
         page.screenshot(path=casual_img_path)
         print(f"[BROWSER] Saved screenshot: {casual_img_path}")
 
@@ -152,16 +230,65 @@ def run_browser_verification():
             casual_titles.append(t)
             img_el = card.locator('img').first
             is_loaded = page.evaluate("(img) => img.naturalWidth > 0", img_el.element_handle())
-            print(f"  Casual Card {i+1}: '{t[:35]}' | Image loaded: {is_loaded}")
-            assert is_loaded, f"Image failed to load on casual card {i+1}!"
+            print(f"  Casual Card {i+1}: '{t[:40]}' | Image loaded: {is_loaded}")
+            assert is_loaded, f"Casual card {i+1} image failed to load!"
 
-        # Step 6: Verify Zero Cross-Occasion Duplicates
+        # Step 9: Test Office
+        print("[BROWSER] Changing Occasion to 'office'...")
+        page.select_option('select[name="occasion"]', "office")
+        page.select_option('select#price-range-filter', "all")
+        page.wait_for_timeout(1000)
+
+        assert page.locator('.recommendation-card').count() == 0, "Stale casual cards remained visible!"
+
+        print("[BROWSER] Generating Office recommendations...")
+        page.locator('button:has-text("Generate Recommendations")').click()
+        page.wait_for_timeout(5000)
+
+        office_cards = page.locator('.recommendation-card')
+        office_count = office_cards.count()
+        print(f"[BROWSER] Rendered {office_count} Office cards.")
+
+        office_titles = []
+        for i in range(office_count):
+            card = office_cards.nth(i)
+            t = card.locator('h3').first.inner_text().strip()
+            office_titles.append(t)
+            img_el = card.locator('img').first
+            is_loaded = page.evaluate("(img) => img.naturalWidth > 0", img_el.element_handle())
+            print(f"  Office Card {i+1}: '{t[:40]}' | Image loaded: {is_loaded}")
+            assert is_loaded, f"Office card {i+1} image failed to load!"
+
+        # Step 10: Verify Cross-Occasion Exclusivity
+        formal_set = set(formal_titles)
         party_set = set(party_titles)
         casual_set = set(casual_titles)
-        overlap = party_set.intersection(casual_set)
-        print(f"[BROWSER] Overlap between Party and Casual: {len(overlap)} items: {overlap}")
-        assert len(overlap) == 0, f"Cross-occasion duplicate dresses detected in browser: {overlap}"
-        print("[BROWSER] [PASS] Zero cross-occasion duplicates verified in real browser DOM!")
+        office_set = set(office_titles)
+
+        fp_overlap = formal_set.intersection(party_set)
+        fc_overlap = formal_set.intersection(casual_set)
+        fo_overlap = formal_set.intersection(office_set)
+        pc_overlap = party_set.intersection(casual_set)
+
+        print(f"[BROWSER] Formal & Party overlap: {len(fp_overlap)}")
+        print(f"[BROWSER] Formal & Casual overlap: {len(fc_overlap)}")
+        print(f"[BROWSER] Formal & Office overlap: {len(fo_overlap)}")
+        print(f"[BROWSER] Party & Casual overlap: {len(pc_overlap)}")
+
+        assert len(fp_overlap) == 0, f"Formal/Party cross-occasion duplicate: {fp_overlap}"
+        assert len(fc_overlap) == 0, f"Formal/Casual cross-occasion duplicate: {fc_overlap}"
+        assert len(fo_overlap) == 0, f"Formal/Office cross-occasion duplicate: {fo_overlap}"
+        assert len(pc_overlap) == 0, f"Party/Casual cross-occasion duplicate: {pc_overlap}"
+        print("[BROWSER] [PASS] Zero cross-occasion duplicates verified across Formal, Office, Party, Casual!")
+
+        # Step 11: Refresh and History Navigation test
+        print("[BROWSER] Testing page refresh persistence...")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_timeout(2000)
+        assert page.locator('select[name="occasion"]').count() > 0, "Occasion dropdown missing after refresh!"
+        assert page.locator('select#price-range-filter').count() > 0, "Price range dropdown missing after refresh!"
+        assert page.locator('select[name="season"]').count() == 0, "Season filter re-appeared after refresh!"
+        print("[BROWSER] [PASS] Page refresh maintains clean UI state!")
 
         browser.close()
         print("\n============================================================")

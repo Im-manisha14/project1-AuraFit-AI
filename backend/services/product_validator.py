@@ -359,9 +359,36 @@ def check_price_suitability(
     price_max: Optional[float] = None,
     price_range: Optional[str] = None
 ) -> Tuple[bool, str]:
-    """Validate extracted current selling price against range filters."""
+    """Validate extracted current selling price against range filters strictly."""
     if price <= 0:
         return False, "Price must be greater than zero"
+
+    if price_range:
+        pr = str(price_range).lower().strip()
+        if pr in ('under_500', 'under 500', '<500'):
+            if price >= 500:
+                return False, f"Price INR {price:.1f} is not under 500"
+            return True, "Price in valid range"
+        elif pr in ('500_1000', '500-1000'):
+            if not (500 <= price <= 1000):
+                return False, f"Price INR {price:.1f} is not in 500-1000 range"
+            return True, "Price in valid range"
+        elif pr in ('1000_2500', '1000-2500'):
+            if not (1000 < price <= 2500):
+                return False, f"Price INR {price:.1f} is not in 1000-2500 range"
+            return True, "Price in valid range"
+        elif pr in ('2500_5000', '2500-5000'):
+            if not (2500 < price <= 5000):
+                return False, f"Price INR {price:.1f} is not in 2500-5000 range"
+            return True, "Price in valid range"
+        elif pr in ('5000_10000', '5000-10000'):
+            if not (5000 < price <= 10000):
+                return False, f"Price INR {price:.1f} is not in 5000-10000 range"
+            return True, "Price in valid range"
+        elif pr in ('above_10000', 'above 10000', '>10000', '10000_plus', '10000+'):
+            if price <= 10000:
+                return False, f"Price INR {price:.1f} is not above 10000"
+            return True, "Price in valid range"
 
     min_p, max_p = None, None
     if price_range and price_range.lower() in PRICE_RANGES:
@@ -527,27 +554,20 @@ def validate_live_product(
         if occ_res.decision == 'REJECT':
             return {"accepted": False, "reason": f"Occasion mismatch: {occ_res.reason}", "normalized_product": None}
 
-        # Primary Occasion Exclusivity: Distinct occasions cannot cross-contaminate
-        if norm_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports', 'date', 'brunch', 'dinner', 'cocktail', 'traditional'):
-            if primary_occ != norm_occ:
-                if primary_occ == 'casual' and norm_occ in ('party', 'formal', 'office', 'wedding'):
-                    return {
-                        "accepted": False,
-                        "reason": f"Occasion mismatch: Casual dress cannot appear under {norm_occ} (primary_occasion=casual)",
-                        "normalized_product": None
-                    }
-                if primary_occ in ('party', 'cocktail') and norm_occ in ('casual', 'formal', 'office', 'sports'):
-                    return {
-                        "accepted": False,
-                        "reason": f"Occasion mismatch: Party/cocktail dress cannot appear under {norm_occ} (primary_occasion={primary_occ})",
-                        "normalized_product": None
-                    }
-                if best_score >= 8.0 and best_score > (occ_res.confidence * 16.0 * 1.05):
-                    return {
-                        "accepted": False,
-                        "reason": f"Occasion mismatch: Primary intrinsic occasion is '{primary_occ}' (score {best_score:.1f} vs requested {norm_occ})",
-                        "normalized_product": None
-                    }
+        # Hard Occasion Exclusivity: Distinct occasions cannot cross-contaminate
+        if norm_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports', 'date', 'brunch', 'dinner', 'cocktail', 'traditional', 'festive'):
+            alias_groups = [
+                {'party', 'cocktail'},
+                {'traditional', 'festive'},
+                {'evening', 'dinner'},
+            ]
+            is_alias = any(norm_occ in g and primary_occ in g for g in alias_groups)
+            if primary_occ != norm_occ and not is_alias:
+                return {
+                    "accepted": False,
+                    "reason": f"Occasion mismatch: Product primary occasion '{primary_occ}' does not match requested '{norm_occ}'",
+                    "normalized_product": None
+                }
 
     # Phase 12: Cross-occasion duplicate protection
     if occasion_registry is not None and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):

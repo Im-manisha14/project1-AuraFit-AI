@@ -1,9 +1,19 @@
 import os
+import sys
 from datetime import timedelta
 from dotenv import load_dotenv
 
+if sys.platform == 'win32':
+    try:
+        import werkzeug._reloader
+        werkzeug._reloader.reloader_loops['watchdog'] = werkzeug._reloader.reloader_loops['stat']
+        werkzeug._reloader.reloader_loops['auto'] = werkzeug._reloader.reloader_loops['stat']
+    except Exception:
+        pass
+
 basedir = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(basedir, '.env'), override=True)
+
 
 class Config:
     # Flask config

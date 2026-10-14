@@ -10,10 +10,51 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to add auth token
+const isTokenExpired = (token) => {
+  if (!token) return true;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return true;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const { exp } = JSON.parse(jsonPayload);
+    return !exp || (Date.now() / 1000) >= (exp - 10);
+  } catch (e) {
+    return true;
+  }
+};
+
+// Request interceptor to add auth token and proactively refresh if expired
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token');
+  async (config) => {
+    if (config.url?.includes('/auth/refresh') || config.url?.includes('/auth/login')) {
+      return config;
+    }
+
+    let token = localStorage.getItem('access_token');
+    const refreshToken = localStorage.getItem('refresh_token');
+
+    if (refreshToken && isTokenExpired(token)) {
+      try {
+        const res = await axios.post(
+          `${API_URL}/auth/refresh`,
+          {},
+          { headers: { Authorization: `Bearer ${refreshToken}` } }
+        );
+        token = res.data.access_token;
+        localStorage.setItem('access_token', token);
+      } catch (err) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        token = null;
+      }
+    }
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -23,6 +64,7 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
 
 // Response interceptor to handle token refresh
 api.interceptors.response.use(

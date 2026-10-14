@@ -14,7 +14,7 @@ def generate_recommendations():
         user_id_str = get_jwt_identity()
         # Convert string identity back to int
         user_id = int(user_id_str)
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         
         # Get user data
         user = db.session.get(User, user_id)
@@ -33,7 +33,7 @@ def generate_recommendations():
         if norm_gender not in ('female', 'male'):
             norm_gender = 'female'
 
-        category = (data.get('category') or ('dress' if norm_gender == 'female' else 'clothing')).strip().lower()
+        category = (str(data.get('category') or ('dress' if norm_gender == 'female' else 'clothing'))).strip().lower()
 
         # Reject invalid gender / category combinations instead of silently changing them (Section 1 Contract)
         if norm_gender == 'male' and category in ('dress', 'dresses', 'skirt', 'saree', 'lehenga', 'gown'):
@@ -41,14 +41,15 @@ def generate_recommendations():
         if norm_gender == 'female' and category in ('menswear', 'men_clothing', 'sherwani', 'men_suit'):
             return jsonify({'error': f"Invalid category '{category}' for gender 'female'"}), 400
 
-        occasion = (data.get('occasion') or 'casual').strip().lower()
-        season = (data.get('season') or 'all').strip().lower()
+        occasion = (str(data.get('occasion') or 'casual')).strip().lower()
+        season = (str(data.get('season') or 'all')).strip().lower()
         limit = max(1, min(50, int(data.get('limit') or data.get('results') or 25)))
         min_price = data.get('price_min') if data.get('price_min') is not None else data.get('min_price')
         max_price = data.get('price_max') if data.get('price_max') is not None else data.get('max_price')
         price_range = data.get('price_range')
         retailer = data.get('retailer')
-        skin_tone = (data.get('skin_tone') or (profile.skin_tone if profile else 'medium')).strip().lower()
+        skin_tone = (str(data.get('skin_tone') or (profile.skin_tone if (profile and profile.skin_tone) else None) or 'medium')).strip().lower()
+
 
         # Initialize recommendation engine
         engine = RecommendationEngine()
@@ -183,7 +184,12 @@ def generate_recommendations():
         }), 200
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+
 
 
 @bp.route('/track', methods=['POST'])
