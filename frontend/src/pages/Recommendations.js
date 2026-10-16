@@ -138,6 +138,19 @@ const Recommendations = () => {
         }
       }
 
+      // Strict Formal Occasion Guard: reject casual/beach/club/loungewear and require positive formal evidence
+      if (targetOcc === 'formal') {
+        const text = `${outfit.name || outfit.title || ''} ${outfit.description || ''}`.toLowerCase();
+        const hasCasualMarkers = /\b(casual|casual\s+wear|beachwear|resort\s*wear|vacation\s*wear|clubwear|partywear|party\s*wear|loungewear|lounge\s*wear|t-shirt\s*dress|sleepwear|nightwear|pyjama)\b/i.test(text);
+        if (hasCasualMarkers) {
+          return false;
+        }
+        const hasFormalEvidence = /\b(formal|tailored|structured|blazer\s+dress|pencil\s+dress|business\s+formal|evening\s+gown|floor\s+length|black\s+tie|gala|crepe\s+sheath|ponte\s+sheath)\b/i.test(text);
+        if (!hasFormalEvidence) {
+          return false;
+        }
+      }
+
       // Defensive image & product URL deduplication
       const img = (outfit.image_url || outfit.image || '').trim();
       const directUrl = (outfit.product_url || outfit.shopping_url || '').split('?')[0].trim();
@@ -180,6 +193,19 @@ const Recommendations = () => {
       if (targetOcc) {
         const itemOcc = (outfit.occasion || outfit.primary_occasion || '').toLowerCase().trim();
         if (itemOcc && !validOccs.includes(itemOcc)) {
+          return false;
+        }
+      }
+
+      // Strict Formal Occasion Guard: reject casual/beach/club/loungewear and require positive formal evidence
+      if (targetOcc === 'formal') {
+        const text = `${outfit.name || outfit.title || ''} ${outfit.description || ''}`.toLowerCase();
+        const hasCasualMarkers = /\b(casual|casual\s+wear|beachwear|resort\s*wear|vacation\s*wear|clubwear|partywear|party\s*wear|loungewear|lounge\s*wear|t-shirt\s*dress|sleepwear|nightwear|pyjama)\b/i.test(text);
+        if (hasCasualMarkers) {
+          return false;
+        }
+        const hasFormalEvidence = /\b(formal|tailored|structured|blazer\s+dress|pencil\s+dress|business\s+formal|evening\s+gown|floor\s+length|black\s+tie|gala|crepe\s+sheath|ponte\s+sheath)\b/i.test(text);
+        if (!hasFormalEvidence) {
           return false;
         }
       }
@@ -472,6 +498,7 @@ const Recommendations = () => {
             </div>
           </div>
           <motion.button
+            id="generate-recommendations-btn"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={generateRecommendations}

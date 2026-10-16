@@ -20,6 +20,11 @@ from services.occasion_classifier import (
     normalize_season,
     build_normalized_product_text
 )
+from services.dress_style_classifier import (
+    classify_dress_style,
+    is_style_compatible,
+    validate_occasion_and_style,
+)
 from services.product_contract import (
     format_recommendation_contract,
     parse_discount_value
@@ -202,13 +207,13 @@ FORBIDDEN_FEMALE_DRESS_PATTERNS = [
     (r'\b(cosmetics?|perfumes?|fragrance|makeup|lipstick|eyeliner|eau\s+de\s+parfum|cologne)\b', 'cosmetics'),
     # Separates
     (r'\b(skirts?|mini\s+skirt|midi\s+skirt|pleated\s+skirt|pencil\s+skirt)\b', 'skirts'),
-    (r'\b(trousers?|pants?|jeans?|denims?|shorts?|leggings?|jeggings?|palazzos?|culottes?|cargos?|joggers?|trackpants?)\b', 'pants'),
+    (r'\b(trousers?|pants?|jeans?|denims?|shorts|leggings?|jeggings?|palazzos?|culottes?|cargos?|joggers?|trackpants?)\b', 'pants'),
     (r'\b(tops?|crop\s+top|tank\s+top|shirts?|blouses?|t-shirts?|tees?|tunics?|camisoles?|sweaters?|cardigans?|hoodies?|sweatshirts?)\b', 'tops'),
     (r'\b(jackets?|blazers?|coats?|shrugs?|capes?|waistcoats?|overcoats?|windcheater|trench\s+coat)\b', 'jackets'),
     # Nightwear & Lingerie
     (r'\b(lingerie|bras?|panties?|briefs?|underwear|sleepwear|nightwear|nighty|nightdress|pajamas?|pyjamas?|bathrobes?|towels?)\b', 'sleepwear'),
     # Fabric/Material
-    (r'\b(dress\s+material|unstitched|fabric|cloth\s+piece|running\s+material|sewing)\b', 'fabric'),
+    (r'\b(dress\s+material|unstitched|cloth\s+piece|running\s+material|sewing)\b', 'fabric'),
 ]
 
 ACCEPTED_DRESS_PATTERNS = [
@@ -259,8 +264,17 @@ def check_category_suitability(
         for pat, cat_name in FORBIDDEN_FEMALE_DRESS_PATTERNS:
             m = re.search(pat, t)
             if m:
-                # If it's a "shirt dress", that's allowed!
-                if cat_name == 'tops' and re.search(r'\bshirt\s+dress\b', t):
+                # If it's a "shirt dress", "t-shirt dress", or "sweater dress", that's allowed!
+                if cat_name == 'tops' and re.search(r'\b(shirt\s+dress|t-shirt\s+dress|tshirt\s+dress|tee\s+dress|sweater\s+dress)\b', t):
+                    continue
+                # If it's a "blazer dress" or "coat dress", that's allowed!
+                if cat_name == 'jackets' and re.search(r'\b(blazer\s+dress|coat\s+dress)\b', t):
+                    continue
+                # If dress comes with a belt
+                if cat_name == 'accessories' and re.search(r'\b(with\s+belt|belted|tie\s+belt)\b', t):
+                    continue
+                # If dress has material description like "rayon fabric" or "cotton fabric"
+                if cat_name == 'fabric' and has_allowed_dress and not re.search(r'\b(dress\s+material|unstitched)\b', t):
                     continue
                 # If it contains both dress and shoes/bags/etc., it's almost always shoes or bag
                 return False, cat_name, f"Forbidden non-dress category detected ({m.group(0)} - {cat_name})"
@@ -298,7 +312,8 @@ def check_gender_suitability(
     Returns (is_compatible, detected_gender, reason)
     Phase 3: Gender must be strict and from the shopping product.
     """
-    t = f"{product_dict.get('title', '')} {product_dict.get('description', '')} {product_dict.get('category', '')} {product_dict.get('product_url', '')}".lower()
+    title_val = product_dict.get('title') or product_dict.get('name') or ''
+    t = f"{title_val} {product_dict.get('description', '')} {product_dict.get('category', '')} {product_dict.get('product_url', '')}".lower()
 
     if target_gender == 'female':
         # Hard reject opposite gender: male evidence
@@ -540,34 +555,20 @@ def validate_live_product(
     if not c_ok:
         return {"accepted": False, "reason": f"Category rejected: {c_reason}", "normalized_product": None}
 
-    # 7. Phase 5 & 6: Occasion Validation & Primary Occasion Exclusivity
+    # 7. Strict Occasion & Dress Style Validation
     norm_occ = normalize_occasion(requested_occasion) if requested_occasion else 'all'
+    style_info = classify_dress_style(c)
     primary_occ, best_score = OccasionClassifier.detect_primary_occasion_with_score(c)
     occ_res = None
     occ_conf = 0.85
 
     if norm_occ and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape', 'minimalist'):
-        occ_res = OccasionClassifier.classify(c, norm_occ, debug=False)
-        occ_conf = occ_res.confidence
+        valid_occ_style, fail_reason, val_details = validate_occasion_and_style(c, norm_occ)
+        if not valid_occ_style:
+            return {"accepted": False, "reason": fail_reason, "normalized_product": None}
 
-        # Phase 6 & Phase 5: Occasion must match product intrinsic occasion
-        if occ_res.decision == 'REJECT':
-            return {"accepted": False, "reason": f"Occasion mismatch: {occ_res.reason}", "normalized_product": None}
-
-        # Hard Occasion Exclusivity: Distinct occasions cannot cross-contaminate
-        if norm_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports', 'date', 'brunch', 'dinner', 'cocktail', 'traditional', 'festive'):
-            alias_groups = [
-                {'party', 'cocktail'},
-                {'traditional', 'festive'},
-                {'evening', 'dinner'},
-            ]
-            is_alias = any(norm_occ in g and primary_occ in g for g in alias_groups)
-            if primary_occ != norm_occ and not is_alias:
-                return {
-                    "accepted": False,
-                    "reason": f"Occasion mismatch: Product primary occasion '{primary_occ}' does not match requested '{norm_occ}'",
-                    "normalized_product": None
-                }
+        occ_res = val_details.get('occasion_res') or OccasionClassifier.classify(c, norm_occ, debug=False)
+        occ_conf = val_details.get('confidence', 0.85)
 
     # Phase 12: Cross-occasion duplicate protection
     if occasion_registry is not None and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):
@@ -653,7 +654,10 @@ def validate_live_product(
         'category': det_c,
         'occasion': primary_occ if (norm_occ in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape')) else norm_occ,
         'season': norm_seas,
-        'style_type': c.get('style_type') or primary_occ or 'casual',
+        'dress_style': style_info.get('style', primary_occ),
+        'is_bodycon': style_info.get('is_bodycon', False),
+        'bodycon_type': style_info.get('bodycon_type', 'none'),
+        'style_type': style_info.get('style') if style_info.get('style') != 'ambiguous' else (primary_occ or 'casual'),
         'brand': c.get('brand') or clean_ret,
         'retailer': clean_ret,
         'store': clean_ret,
@@ -703,6 +707,9 @@ def validate_live_product(
     formatted_contract['product_identity_key'] = canon_prod_key or identity_key
     formatted_contract['canonical_product_key'] = canon_prod_key or identity_key
     formatted_contract['canonical_url'] = canon_url
+    formatted_contract['dress_style'] = normalized_p['dress_style']
+    formatted_contract['is_bodycon'] = normalized_p['is_bodycon']
+    formatted_contract['bodycon_type'] = normalized_p['bodycon_type']
 
     return {
         "accepted": True,

@@ -16,6 +16,12 @@ import re
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
+from services.dress_style_classifier import (
+    classify_dress_style,
+    is_style_compatible,
+    validate_occasion_and_style,
+)
+
 
 @dataclass
 class OccasionResult:
@@ -135,30 +141,38 @@ OCCASION_TAXONOMY = {
         "threshold": 0.45,
     },
     "formal": {
-        "aliases": ["formal", "formal wear", "occasion", "gala", "black tie",
-                    "evening gown", "cocktail party", "office formal", "business formal"],
+        "aliases": ["formal", "formal wear", "gala", "black tie",
+                    "evening gown", "business formal"],
         "positive": [
-            ("formal", 10), ("formal wear", 10), ("formal dress", 12), ("evening gown", 12),
-            ("gala", 10), ("black tie", 12), ("sheath dress", 10), ("tailored formal", 10),
-            ("floor length gown", 10), ("sophisticated gown", 10), ("classic black dress", 8),
-            ("blazer dress", 10), ("pencil dress", 10), ("formal midi", 10), ("workwear", 9),
-            ("professional", 8), ("corporate", 8), ("solid formal", 9),
+            ("tailored sheath", 12), ("formal sheath", 12), ("structured sheath", 12),
+            ("crepe sheath", 10), ("ponte sheath", 10),
+            ("formal", 10), ("formal wear", 12), ("formal dress", 12), ("formal midi", 12),
+            ("formal gown", 12), ("evening gown", 12), ("gala", 10), ("black tie", 12),
+            ("tailored formal", 12), ("structured formal", 12), ("floor length gown", 10),
+            ("sophisticated formal", 10), ("blazer dress", 12), ("pencil dress", 10),
+            ("business formal", 12), ("pleated formal", 10),
         ],
         "negative": [
-            ("casual", -12), ("daily wear", -12), ("regular fit", -10), ("everyday", -10),
-            ("t-shirt", -12), ("beach", -10), ("vacation", -10), ("resort", -10), ("boho", -10),
-            ("mini dress", -10), ("clubwear", -12), ("nightclub", -12), ("party", -10),
-            ("sequin", -12), ("glitter", -12), ("shimmer", -10),
-            ("anarkali", -12), ("kurti", -12), ("saree", -12), ("lehenga", -12), ("salwar", -12), ("ethnic", -10),
+            ("casual", -25), ("casual wear", -25), ("daily wear", -25), ("regular fit", -15), ("everyday", -20),
+            ("t-shirt", -25), ("beach", -25), ("vacation", -25), ("resort", -25), ("boho", -20),
+            ("mini dress", -15), ("clubwear", -25), ("nightclub", -25), ("party", -20),
+            ("partywear", -25), ("party wear", -25), ("cocktail", -15),
+            ("sequin", -15), ("glitter", -15), ("shimmer", -15),
+            ("loungewear", -25), ("lounge wear", -25), ("sleepwear", -25),
+            ("anarkali", -15), ("kurti", -15), ("saree", -15), ("lehenga", -15), ("salwar", -15), ("ethnic", -12),
         ],
         "strong_combos": [
-            ("formal", "gown"), ("evening", "gown"), ("sheath", "dress"),
+            ("formal", "gown"), ("evening", "gown"),
             ("black tie", "dress"), ("formal", "sheath"), ("formal", "dress"),
-            ("blazer", "dress"), ("tailored", "dress"),
+            ("blazer", "dress"), ("tailored", "dress"), ("tailored", "formal"),
+            ("structured", "formal"), ("business", "formal"),
         ],
         "hard_rejects": [
             "sleepwear", "nightwear", "pyjama", "gymwear", "mini dress", "clubwear",
-            "t-shirt dress", "sundress", "beachwear", "casual", "daily wear", "relaxed fit",
+            "club dress", "nightclub dress", "party dress", "partywear", "party wear",
+            "bachelorette", "cocktail dress",
+            "t-shirt dress", "sundress", "beachwear", "casual wear", "casual", "daily wear",
+            "loungewear", "lounge wear", "resort wear", "vacation wear", "relaxed fit",
             "anarkali", "kurti", "saree", "lehenga", "salwar", "sequin", "glitter", "shimmer"
         ],
         "threshold": 0.45,
@@ -524,18 +538,37 @@ def normalize_season(raw):
 
 def build_normalized_product_text(product):
     """Section 61: Concatenate all product fields into normalized lowercase text."""
+    if hasattr(product, 'to_dict'):
+        p = product.to_dict()
+    elif isinstance(product, dict):
+        p = product
+    else:
+        p = {
+            'title': getattr(product, 'name', None) or getattr(product, 'title', None),
+            'description': getattr(product, 'description', None),
+            'brand': getattr(product, 'brand', None),
+            'category': getattr(product, 'category', None),
+            'product_type': getattr(product, 'category', None),
+            'department': getattr(product, 'gender', None),
+            'retailer': getattr(product, 'store', None) or getattr(product, 'retailer', None),
+        }
+
+    raw_desc = str(p.get("description") or p.get("snippet") or "")
+    clean_desc = re.sub(r'curated\s+live\s+from\s+[a-z0-9\s\-&]+\.?', ' ', raw_desc, flags=re.I)
+    clean_desc = re.sub(r'live\s+[a-z0-9\s\-&]+\s+in\s+authentic\s+collection\.?', ' ', clean_desc, flags=re.I)
+
     fields = [
-        product.get("title") or product.get("name") or "",
-        product.get("description") or product.get("snippet") or "",
-        product.get("brand") or "",
-        product.get("category") or "",
-        product.get("product_type") or "",
-        product.get("breadcrumbs") or "",
-        product.get("merchant_category") or "",
-        product.get("attributes") or "",
-        product.get("department") or "",
-        product.get("retailer") or product.get("store") or product.get("source") or "",
-        product.get("link") or product.get("product_url") or "",
+        p.get("title") or p.get("name") or "",
+        clean_desc.strip(),
+        p.get("brand") or "",
+        p.get("category") or "",
+        p.get("product_type") or "",
+        p.get("breadcrumbs") or "",
+        p.get("merchant_category") or "",
+        p.get("attributes") or "",
+        p.get("department") or "",
+        p.get("retailer") or p.get("store") or p.get("source") or "",
+        p.get("link") or p.get("product_url") or "",
     ]
     combined = " ".join(str(f) for f in fields if f)
     t = combined.lower()
@@ -572,6 +605,19 @@ class OccasionClassifier:
                     compatible_occasions=[], positive_signals=[], negative_signals=[hr],
                     evidence=[f"HARD REJECT: {hr}"], decision="REJECT",
                     reason=f"Hard reject keyword matched: {hr}"
+                )
+        # Strict Formal Evidence Guardrail: require positive formal evidence
+        if norm_occ == "formal":
+            formal_keywords = [
+                "formal", "tailored", "structured", "blazer dress", "pencil dress",
+                "evening gown", "black tie", "gala", "business formal", "crepe sheath", "ponte sheath"
+            ]
+            if not any(k in norm_text for k in formal_keywords):
+                return OccasionResult(
+                    occasion=norm_occ, confidence=0.0, primary_occasion="unknown",
+                    compatible_occasions=[], positive_signals=[], negative_signals=["lacks_positive_formal_evidence"],
+                    evidence=["REJECT: Formal requires positive tailored/structured/formal evidence"], decision="REJECT",
+                    reason="Formal requires positive evidence of tailored construction, structured silhouette, or explicit formal/business styling."
                 )
         # Positive signals
         raw_score = 0.0
@@ -783,10 +829,9 @@ OCCASION_QUERY_FAMILIES = {
         "women silk wedding guest dress", "women chiffon wedding dress",
     ],
     "formal": [
-        "women formal dress", "women evening gown", "women formal gown",
-        "women elegant formal dress", "women cocktail dress formal",
-        "women formal sheath dress", "women formal midi dress",
-        "women sophisticated dress",
+        "women formal dress", "women formal sheath dress", "women formal gown",
+        "women elegant formal dress", "women tailored formal dress",
+        "women formal midi dress", "women black tie gown", "women sophisticated formal dress",
     ],
     "office": [
         "women office dress", "women workwear dress", "women formal office midi dress",

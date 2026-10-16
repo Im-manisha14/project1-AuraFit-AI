@@ -16,9 +16,12 @@ print("TESTING /api/recommendations/collections")
 print("=" * 60)
 col_resp = requests.get(f"{base_url}/recommendations/collections?season=summer&limit=8", headers=headers)
 print(f"Collections HTTP Status: {col_resp.status_code}")
-collections = col_resp.json()
+raw_data = col_resp.json()
+collections_dict = raw_data.get('collections', raw_data) if isinstance(raw_data, dict) else {}
 
-for col_name, outfits in collections.items():
+for col_name, outfits in collections_dict.items():
+    if not isinstance(outfits, list):
+        continue
     print(f"\nCollection: {col_name:15} | Count: {len(outfits)}")
     seen_imgs = set()
     dup_imgs = []

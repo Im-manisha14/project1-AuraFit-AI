@@ -25,6 +25,11 @@ from services.occasion_classifier import (
     normalize_occasion as classify_normalize_occasion,
     get_occasion_db_value,
 )
+from services.dress_style_classifier import (
+    classify_dress_style,
+    is_style_compatible,
+    validate_occasion_and_style,
+)
 from models.outfit import Outfit
 
 # Re-export modular retailer architecture components for backwards compatibility
@@ -1681,29 +1686,14 @@ class SerpApiShoppingService:
                 log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=c_reason, canonical_product_id=canonical_id)
                 continue
 
-            # 4b. Occasion classification (post-retrieval validation)
+            # 4b. Strict Occasion & Dress Style Validation
             # Apply to BOTH genders when occasion is specific (not 'all')
             if occasion and occasion.lower() not in ('all', ''):
-                occ_result = OccasionClassifier.classify(it, occasion, debug=False)
-                primary_occ, best_score = OccasionClassifier.detect_primary_occasion_with_score(it)
-                if occ_result.decision == 'REJECT':
+                valid_occ_style, occ_style_reason, val_details = validate_occasion_and_style(it, occasion)
+                if not valid_occ_style:
                     stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
-                    log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: {occ_result.reason}", canonical_product_id=canonical_id)
+                    log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=occ_style_reason, canonical_product_id=canonical_id)
                     continue
-
-                # Hard Occasion Exclusivity: Distinct occasions cannot cross-contaminate
-                req_occ = occasion.lower()
-                if req_occ in ('party', 'casual', 'formal', 'office', 'wedding', 'vacation', 'sports', 'date', 'brunch', 'dinner', 'cocktail', 'traditional', 'festive'):
-                    alias_groups = [
-                        {'party', 'cocktail'},
-                        {'traditional', 'festive'},
-                        {'evening', 'dinner'},
-                    ]
-                    is_alias = any(req_occ in g and primary_occ in g for g in alias_groups)
-                    if primary_occ != req_occ and not is_alias:
-                        stats['occasion_rejected'] = stats.get('occasion_rejected', 0) + 1
-                        log_shopping_filter(title, pre_retailer, norm_gender, det_gender, target_category, det_cat, price, price_label, decision="REJECT", reason=f"Occasion mismatch: Primary occasion '{primary_occ}' does not match requested '{req_occ}'", canonical_product_id=canonical_id)
-                        continue
 
             # 4c. Season classification (post-retrieval validation)
             if season and season.lower() not in ('all', ''):
@@ -2051,6 +2041,7 @@ class SerpApiShoppingService:
                 db_raw_items = [
                     {
                         'title': o.name,
+                        'description': o.description or '',
                         'thumbnail': o.image_url,
                         'thumbnails': o.additional_images or [],
                         'extracted_price': o.price,
@@ -2251,6 +2242,12 @@ class SerpApiShoppingService:
             print("[ShoppingService] Similar query returned 0 results. Checking persisted live SerpApi items under strict validation...")
             from models.outfit import Outfit
             db_query = Outfit.query.filter(Outfit.source.like('serpapi%'), Outfit.in_stock == True)
+            if occasion and occasion.lower() not in ('all', ''):
+                db_query = db_query.filter(Outfit.occasion == occasion.lower())
+            if norm_gender:
+                db_query = db_query.filter(Outfit.gender == norm_gender)
+            if target_category:
+                db_query = db_query.filter(Outfit.category.ilike(f"%{target_category}%"))
             if req_ret:
                 db_query = db_query.filter(Outfit.store.ilike(f"%{req_ret}%"))
             live_db_outfits = db_query.all()
@@ -2345,6 +2342,12 @@ class SerpApiShoppingService:
             )
             if not cat_ok:
                 continue
+
+            # 4b. Strict Occasion & Dress Style Validation
+            if occasion and occasion.lower() not in ('all', ''):
+                valid_occ_style, _, _ = validate_occasion_and_style(it, occasion)
+                if not valid_occ_style:
+                    continue
 
             # 5. Price validation
             live_price = float(price)
