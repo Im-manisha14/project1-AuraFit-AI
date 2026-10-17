@@ -513,15 +513,24 @@ class RecommendationEngine:
     def _calculate_occasion_score(self, outfit, occasion: str) -> float:
         """
         Occasion suitability (20 % weight).
-          1.0  exact match
-          0.70 user selected 'all' (any occasion accepted)
-          0.10 mismatch
+        Uses 3-state occasion decision.
+        SUITABLE: 0.90 - 1.0 (scaled by evidence)
+        UNCERTAIN: 0.10 for formal, 0.35 for general
+        UNSUITABLE / mismatch: 0.0
         """
         if not occasion or occasion == 'all':
             return 0.70
-        if outfit.occasion and outfit.occasion.lower() == occasion.lower():
-            return 1.0
-        return 0.10
+
+        from services.occasion_classifier import OccasionClassifier, OccasionDecision
+        p_dict = outfit.to_dict() if hasattr(outfit, 'to_dict') else {'title': getattr(outfit, 'name', '')}
+        dec = OccasionClassifier.classify_occasion_decision(p_dict, occasion)
+
+        if dec.status == OccasionDecision.SUITABLE:
+            return round(min(1.0, max(0.85, dec.confidence)), 2)
+        elif dec.status == OccasionDecision.UNCERTAIN:
+            return 0.10 if occasion.lower() == 'formal' else 0.35
+        else:
+            return 0.0
 
     def _calculate_season_score(self, outfit, season: str) -> float:
         """
@@ -541,6 +550,10 @@ class RecommendationEngine:
         return 0.10
 
     def _calculate_overall_score(self, scores: Dict[str, float]) -> float:
+        # Phase 5: Do not let personalization scores override an occasion mismatch.
+        # If occasion score is 0.0 (mismatch/unsuitable), cap overall score at 0.25.
+        if scores.get('comfort', 1.0) == 0.0:
+            return 0.25
         total = sum(scores[k] * self.weights.get(k, 0.0) for k in scores)
         return round(total, 2)
 

@@ -23,6 +23,25 @@ from services.dress_style_classifier import (
 )
 
 
+class OccasionDecision:
+    SUITABLE = "SUITABLE"
+    UNSUITABLE = "UNSUITABLE"
+    UNCERTAIN = "UNCERTAIN"
+
+
+@dataclass
+class ThreeStateOccasionResult:
+    """Three-state occasion decision per Phase 3 requirement."""
+    status: str  # SUITABLE | UNSUITABLE | UNCERTAIN
+    occasion: str
+    confidence: float
+    evidence_strength: float
+    primary_occasion: str
+    positive_signals: List[str]
+    negative_signals: List[str]
+    reason: str
+
+
 @dataclass
 class OccasionResult:
     """Full classification result for one product / one requested occasion."""
@@ -35,6 +54,7 @@ class OccasionResult:
     evidence: List[str]
     decision: str  # ACCEPT | SECONDARY | REJECT
     reason: str
+    three_state_decision: str = "UNCERTAIN"
 
 
 @dataclass
@@ -182,8 +202,8 @@ OCCASION_TAXONOMY = {
                     "professional", "corporate", "9 to 5", "9-to-5"],
         "positive": [
             ("office dress", 12), ("workwear", 11), ("work dress", 11), ("business casual", 10),
-            ("professional", 10), ("sheath dress", 10), ("shirt dress", 9), ("pencil dress", 10),
-            ("tailored work", 10), ("corporate", 10),
+            ("professional", 10), ("office sheath", 10), ("work sheath", 10), ("shirt dress", 9),
+            ("pencil dress for work", 10), ("tailored work", 10), ("corporate", 10),
         ],
         "negative": [
             ("party", -12), ("clubwear", -12), ("nightclub", -12), ("sequin", -12),
@@ -191,7 +211,8 @@ OCCASION_TAXONOMY = {
         ],
         "strong_combos": [
             ("office", "dress"), ("work", "dress"), ("professional", "dress"),
-            ("business", "dress"), ("sheath", "dress"),
+            ("business", "dress"), ("office", "sheath"), ("work", "sheath"),
+            ("corporate", "dress"),
         ],
         "hard_rejects": ["party dress", "nightclub dress", "sequin", "glitter", "sleepwear", "pyjama", "bikini"],
         "threshold": 0.45,
@@ -556,6 +577,8 @@ def build_normalized_product_text(product):
     raw_desc = str(p.get("description") or p.get("snippet") or "")
     clean_desc = re.sub(r'curated\s+live\s+from\s+[a-z0-9\s\-&]+\.?', ' ', raw_desc, flags=re.I)
     clean_desc = re.sub(r'live\s+[a-z0-9\s\-&]+\s+in\s+authentic\s+collection\.?', ' ', clean_desc, flags=re.I)
+    clean_desc = re.sub(r'live\s+[a-z0-9\s\-&]+\s+curated\s+for\s+[a-z0-9\s\-&]+\s+wear\.?', ' ', clean_desc, flags=re.I)
+    clean_desc = re.sub(r'curated\s+for\s+[a-z0-9\s\-&]+\s+wear\.?', ' ', clean_desc, flags=re.I)
 
     fields = [
         p.get("title") or p.get("name") or "",
@@ -586,94 +609,270 @@ class OccasionClassifier:
     SECONDARY_THRESHOLD = 0.30
 
     @classmethod
-    def classify(cls, product, requested_occasion, debug=True):
+    def classify_occasion_decision(cls, product, requested_occasion, debug=False) -> ThreeStateOccasionResult:
+        """
+        Phase 3: Authoritative 3-state occasion classification decision.
+        Evaluates intrinsic product title, description, brand, and category.
+        Returns:
+          - SUITABLE: sufficient positive evidence for the selected occasion.
+          - UNSUITABLE: clear evidence that the product belongs to a different occasion.
+          - UNCERTAIN: insufficient evidence to make a reliable decision.
+        """
         norm_occ = normalize_occasion(requested_occasion)
+        norm_text = build_normalized_product_text(product)
+        if not norm_text:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.UNCERTAIN,
+                occasion=norm_occ,
+                confidence=0.0,
+                evidence_strength=0.0,
+                primary_occasion="unknown",
+                positive_signals=[],
+                negative_signals=["empty_text"],
+                reason="Product has missing or empty metadata (insufficient evidence)."
+            )
+
+        if norm_occ == "formal":
+            return cls._classify_formal_decision(norm_text, debug=debug)
+
+        return cls._classify_general_decision(norm_text, norm_occ, debug=debug)
+
+    @classmethod
+    def _classify_formal_decision(cls, norm_text: str, debug=False) -> ThreeStateOccasionResult:
+        # 1. Clear evidence that the product belongs to a different occasion -> UNSUITABLE
+        unsuitable_patterns = [
+            (r'\b(casual|casual\s+wear|daily\s+wear|everyday|cotton\s+casual|t-shirt\s+dress|tshirt\s+dress|tee\s+dress|denim\s+dress|shirt\s+dress\s+casual)\b', "casual daywear"),
+            (r'\b(beach|beachwear|beach\s+dress|resort\s*wear|vacation\s*wear|holiday\s+wear|sundress|boho|bohemian|kaftan|caftan)\b', "beach/resort wear"),
+            (r'\b(clubwear|nightclub|club\s+dress|bachelorette|partywear|party\s+wear|rave|disco|prom\s+dress)\b', "clubwear/partywear"),
+            (r'\b(loungewear|lounge\s+wear|sleepwear|nightwear|nighty|nightdress|pajamas?|pyjamas?|bathrobe|towel)\b', "loungewear/sleepwear"),
+            (r'\b(anarkali|kurti|kurtis|kurta|saree|sari|lehenga|salwar|ethnic\s+wear|indo\s+western)\b', "traditional/ethnic wear"),
+            (r'\b(gymwear|activewear|sportswear|tennis\s+dress|workout\s+dress)\b', "activewear"),
+            (r'\b(micro\s+mini|strappy\s+mini|backless\s+sexy|cutout\s+mini)\b', "revealing party mini"),
+        ]
+
+        negative_found = []
+        for pat, desc in unsuitable_patterns:
+            m = re.search(pat, norm_text)
+            if m:
+                negative_found.append(f"{desc} ('{m.group(0)}')")
+
+        if negative_found:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.UNSUITABLE,
+                occasion="formal",
+                confidence=0.95,
+                evidence_strength=0.0,
+                primary_occasion="casual" if any("casual" in n for n in negative_found) else "other",
+                positive_signals=[],
+                negative_signals=negative_found,
+                reason=f"Clear evidence of incompatible occasion: {', '.join(negative_found[:3])}"
+            )
+
+        # Intrinsic primary occasion check (Phase 4: judge product strictly by its own attributes)
+        primary, best_score = cls.detect_primary_occasion_with_score(norm_text)
+        if primary not in ("formal", "evening", "ambiguous", "unknown") and best_score >= 8.0:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.UNSUITABLE,
+                occasion="formal",
+                confidence=0.90,
+                evidence_strength=0.0,
+                primary_occasion=primary,
+                positive_signals=[],
+                negative_signals=[f"primary_occasion_is_{primary}"],
+                reason=f"Product belongs to a different occasion: primary intrinsic occasion is {primary} (score={best_score:.1f})"
+            )
+
+        # 2. Check for SUITABLE positive formal evidence
+        positive_formal_patterns = [
+            (r'\b(business\s+formal|corporate\s+formal|executive\s+formal|professional\s+formalwear|tailored\s+formalwear)\b', 16, "business formal"),
+            (r'\b(tailored\s+formal\s+dress|structured\s+formal\s+dress|formal\s+midi\s+dress|formal\s+sheath\s+dress)\b', 15, "tailored formal dress"),
+            (r'\b(formal\s+blazer\s+dress|tailored\s+blazer\s+sheath|blazer\s+sheath\s+dress|tailored\s+blazer\s+dress)\b', 15, "formal blazer dress"),
+            (r'\b(crepe\s+formal\s+sheath|ponte\s+formal\s+sheath|tailored\s+crepe\s+sheath|structured\s+sheath\s+dress\s+for\s+formal)\b', 14, "formal crepe sheath"),
+            (r'\b(black\s+tie\s+evening\s+gown|black\s+tie\s+gown|black\s+tie\s+dress|black\s+tie)\b', 16, "black tie"),
+            (r'\b(gala\s+gown|formal\s+gala\s+gown|floor\s+length\s+formal\s+gown|floor\s+length\s+gala)\b', 15, "gala gown"),
+            (r'\b(formal\s+gown|evening\s+gown|floor\s+length\s+gown)\b', 13, "formal gown"),
+            (r'\b(tailored\s+formal|structured\s+formal|formal\s+occasion\s+dress|formalwear\s+dress)\b', 12, "tailored formal"),
+            (r'\b(formal\s+dress|formal\s+wear|formalwear|formal\s+event|formal\s+banquet)\b', 10, "formal wear"),
+            (r'\b(structured\s+sheath\s+dress|tailored\s+sheath\s+dress|tailored\s+pencil\s+dress)\b', 10, "structured/tailored sheath"),
+        ]
+
+        pos_signals = []
+        total_pos_score = 0.0
+        for pat, weight, label in positive_formal_patterns:
+            m = re.search(pat, norm_text)
+            if m:
+                pos_signals.append(f"{label} ('{m.group(0)}') (+{weight})")
+                total_pos_score += weight
+
+        # Strong combination bonuses
+        if re.search(r'\b(tailored|structured)\b', norm_text) and re.search(r'\b(formal|corporate|business|executive)\b', norm_text):
+            pos_signals.append("COMBO(tailored/structured + formal/corporate) (+10)")
+            total_pos_score += 10.0
+
+        if re.search(r'\b(sheath|midi|pencil)\b', norm_text) and re.search(r'\b(formal|tailored)\b', norm_text):
+            pos_signals.append("COMBO(sheath/midi/pencil + formal/tailored) (+10)")
+            total_pos_score += 10.0
+
+        if total_pos_score >= 10.0:
+            confidence = min(0.98, max(0.80, total_pos_score / 25.0))
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.SUITABLE,
+                occasion="formal",
+                confidence=confidence,
+                evidence_strength=total_pos_score,
+                primary_occasion="formal",
+                positive_signals=pos_signals,
+                negative_signals=[],
+                reason=f"Sufficient positive formal evidence: {', '.join(pos_signals[:4])} (score={total_pos_score:.1f})"
+            )
+
+        # 3. UNCERTAIN (Phase 3: generic silhouette words alone without supporting formal evidence)
+        generic_markers = []
+        for word in ["dress", "sheath", "midi", "maxi", "elegant", "women", "fitted", "knee length"]:
+            if re.search(rf'\b{word}\b', norm_text):
+                generic_markers.append(word)
+
+        uncertain_reason = (
+            f"Insufficient formal evidence: Generic terms ({', '.join(generic_markers[:4])}) "
+            f"without supporting business-formal, tailored construction, or black-tie/gala details."
+        ) if generic_markers else "Insufficient formal evidence: No supporting formal or tailored details found."
+
+        return ThreeStateOccasionResult(
+            status=OccasionDecision.UNCERTAIN,
+            occasion="formal",
+            confidence=0.30,
+            evidence_strength=total_pos_score,
+            primary_occasion="ambiguous",
+            positive_signals=pos_signals,
+            negative_signals=["lacks_sufficient_positive_formal_evidence"],
+            reason=uncertain_reason
+        )
+
+    @classmethod
+    def _classify_general_decision(cls, norm_text: str, norm_occ: str, debug=False) -> ThreeStateOccasionResult:
         profile = OCCASION_TAXONOMY.get(norm_occ)
         if not profile:
-            return OccasionResult(
-                occasion=norm_occ, confidence=0.70, primary_occasion=norm_occ,
-                compatible_occasions=[norm_occ], positive_signals=["no taxonomy"],
-                negative_signals=[], evidence=["default accept"],
-                decision="ACCEPT", reason="Occasion not in taxonomy -- lenient pass"
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.SUITABLE, occasion=norm_occ, confidence=0.70,
+                evidence_strength=10.0, primary_occasion=norm_occ, positive_signals=["no taxonomy"],
+                negative_signals=[], reason="Occasion not in taxonomy -- lenient pass"
             )
-        norm_text = build_normalized_product_text(product)
-        # Hard rejects
+
+        # Check hard rejects
         for hr in profile.get("hard_rejects", []):
             if hr.lower() in norm_text:
-                return OccasionResult(
-                    occasion=norm_occ, confidence=0.0, primary_occasion="unknown",
-                    compatible_occasions=[], positive_signals=[], negative_signals=[hr],
-                    evidence=[f"HARD REJECT: {hr}"], decision="REJECT",
-                    reason=f"Hard reject keyword matched: {hr}"
+                return ThreeStateOccasionResult(
+                    status=OccasionDecision.UNSUITABLE, occasion=norm_occ, confidence=0.0,
+                    evidence_strength=0.0, primary_occasion="unknown", positive_signals=[],
+                    negative_signals=[hr], reason=f"Hard reject keyword matched: {hr}"
                 )
-        # Strict Formal Evidence Guardrail: require positive formal evidence
-        if norm_occ == "formal":
-            formal_keywords = [
-                "formal", "tailored", "structured", "blazer dress", "pencil dress",
-                "evening gown", "black tie", "gala", "business formal", "crepe sheath", "ponte sheath"
-            ]
-            if not any(k in norm_text for k in formal_keywords):
-                return OccasionResult(
-                    occasion=norm_occ, confidence=0.0, primary_occasion="unknown",
-                    compatible_occasions=[], positive_signals=[], negative_signals=["lacks_positive_formal_evidence"],
-                    evidence=["REJECT: Formal requires positive tailored/structured/formal evidence"], decision="REJECT",
-                    reason="Formal requires positive evidence of tailored construction, structured silhouette, or explicit formal/business styling."
-                )
-        # Positive signals
-        raw_score = 0.0
-        positive_matched = []
-        for kw, weight in profile.get("positive", []):
-            if kw.lower() in norm_text:
-                raw_score += weight
-                positive_matched.append(f"{kw} (+{weight})")
-        # Negative signals
-        raw_deduction = 0.0
-        negative_matched = []
-        for kw, weight in profile.get("negative", []):
-            if kw.lower() in norm_text:
-                raw_deduction += abs(weight)
-                negative_matched.append(f"{kw} ({weight})")
-        # Strong combo bonuses
+
+        raw_score = sum(w for kw, w in profile.get("positive", []) if kw.lower() in norm_text)
+        raw_ded = sum(abs(w) for kw, w in profile.get("negative", []) if kw.lower() in norm_text)
         for kw1, kw2 in profile.get("strong_combos", []):
             if kw1.lower() in norm_text and kw2.lower() in norm_text:
                 raw_score += 15.0
-                positive_matched.append(f"COMBO({kw1}+{kw2}) (+15)")
-        net = max(0.0, raw_score - raw_deduction)
-        confidence = min(1.0, net / 16.0)
+
+        net = max(0.0, raw_score - raw_ded)
+        threshold = profile.get("threshold", cls.ACCEPT_THRESHOLD) * 16.0
         primary, best_score = cls.detect_primary_occasion_with_score(norm_text)
-        threshold = profile.get("threshold", cls.ACCEPT_THRESHOLD)
-        if confidence >= threshold:
-            # Check if another distinct occasion is significantly stronger
-            if primary != norm_occ and best_score > (net * 1.15) and best_score >= 10.0:
-                decision = "REJECT"
-                reason = f"Occasion mismatch: Primary intrinsic occasion is {primary} (score={best_score:.1f} vs requested {norm_occ}={net:.1f})"
-            else:
+
+        if primary != norm_occ and best_score > (net * 1.25) and best_score >= 10.0:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.UNSUITABLE, occasion=norm_occ, confidence=0.1,
+                evidence_strength=net, primary_occasion=primary, positive_signals=[],
+                negative_signals=[f"primary_is_{primary}"],
+                reason=f"Primary intrinsic occasion is {primary} (score={best_score:.1f} vs requested {norm_occ}={net:.1f})"
+            )
+
+        if net >= threshold and raw_score >= 8.0:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.SUITABLE, occasion=norm_occ, confidence=min(1.0, net / 16.0),
+                evidence_strength=net, primary_occasion=norm_occ,
+                positive_signals=[f"net_score_{net:.1f}"], negative_signals=[],
+                reason=f"Sufficient {norm_occ} evidence (score={net:.1f})"
+            )
+        elif net > 0:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.UNCERTAIN, occasion=norm_occ, confidence=min(0.5, net / 16.0),
+                evidence_strength=net, primary_occasion="ambiguous",
+                positive_signals=[f"marginal_score_{net:.1f}"], negative_signals=[],
+                reason=f"Marginal/uncertain {norm_occ} evidence (score={net:.1f}, need>={threshold:.1f})"
+            )
+        else:
+            return ThreeStateOccasionResult(
+                status=OccasionDecision.UNSUITABLE, occasion=norm_occ, confidence=0.0,
+                evidence_strength=0.0, primary_occasion="unknown",
+                positive_signals=[], negative_signals=["zero_evidence"],
+                reason=f"No positive {norm_occ} evidence found"
+            )
+
+    @classmethod
+    def classify(cls, product, requested_occasion, debug=True):
+        norm_occ = normalize_occasion(requested_occasion)
+        three_state = cls.classify_occasion_decision(product, norm_occ, debug=False)
+
+        # For strict Formal, ONLY SUITABLE products pass (Phase 3 requirement)
+        if norm_occ == "formal":
+            if three_state.status == OccasionDecision.SUITABLE:
                 decision = "ACCEPT"
-                reason = f"Sufficient {norm_occ} evidence (confidence={confidence:.2f})"
-        elif confidence >= cls.SECONDARY_THRESHOLD:
+                confidence = three_state.confidence
+                reason = three_state.reason
+            elif three_state.status == OccasionDecision.UNSUITABLE:
+                decision = "REJECT"
+                confidence = 0.0
+                reason = f"Unsuitable for Formal: {three_state.reason}"
+            else:  # UNCERTAIN
+                decision = "REJECT"
+                confidence = 0.20
+                reason = f"Uncertain formal evidence: {three_state.reason}"
+
+            evidence_lines = [f"Three-state decision: {three_state.status} (score={three_state.evidence_strength:.1f})"]
+            if three_state.positive_signals:
+                evidence_lines.append("Positive: " + ", ".join(three_state.positive_signals[:8]))
+            if three_state.negative_signals:
+                evidence_lines.append("Negative: " + ", ".join(three_state.negative_signals[:5]))
+
+            if debug:
+                _safe_print(
+                    f"\n[OCCASION FILTER (FORMAL)]\n"
+                    f"Product: {(product.get('title') or product.get('name') or 'Unknown')[:80]}\n"
+                    f"Decision: {decision} ({three_state.status}) | Confidence: {confidence:.2f}\n"
+                    f"Reason: {reason}"
+                )
+
+            return OccasionResult(
+                occasion=norm_occ, confidence=confidence, primary_occasion=three_state.primary_occasion,
+                compatible_occasions=[norm_occ] if decision == "ACCEPT" else [],
+                positive_signals=three_state.positive_signals,
+                negative_signals=three_state.negative_signals,
+                evidence=evidence_lines,
+                decision=decision, reason=reason,
+                three_state_decision=three_state.status
+            )
+
+        # General pipeline for non-formal occasions
+        if three_state.status == OccasionDecision.SUITABLE:
+            decision = "ACCEPT"
+        elif three_state.status == OccasionDecision.UNCERTAIN:
             decision = "SECONDARY"
-            reason = f"Marginal {norm_occ} evidence (confidence={confidence:.2f})"
         else:
             decision = "REJECT"
-            reason = f"Insufficient {norm_occ} evidence (confidence={confidence:.2f}, need>={threshold:.2f})"
-        compatible = cls._detect_all_occasions(norm_text, norm_occ)
-        evidence_lines = [f"Net score: {net:.1f} ({raw_score:.1f} pos - {raw_deduction:.1f} neg)"]
-        if positive_matched:
-            evidence_lines.append("Positive: " + ", ".join(positive_matched[:8]))
-        if negative_matched:
-            evidence_lines.append("Negative: " + ", ".join(negative_matched[:5]))
-        if debug:
-            _safe_print(
-                f"\n[OCCASION FILTER]\n"
-                f"Product: {(product.get('title') or product.get('name') or 'Unknown')[:80]}\n"
-                f"Requested: {norm_occ} | Confidence: {confidence:.2f} | Decision: {decision}\n"
-                f"Reason: {reason}"
-            )
+
+        evidence_lines = [f"Three-state decision: {three_state.status} (score={three_state.evidence_strength:.1f})"]
+        if three_state.positive_signals:
+            evidence_lines.append("Positive: " + ", ".join(three_state.positive_signals[:8]))
+        if three_state.negative_signals:
+            evidence_lines.append("Negative: " + ", ".join(three_state.negative_signals[:5]))
+
         return OccasionResult(
-            occasion=norm_occ, confidence=confidence, primary_occasion=primary,
-            compatible_occasions=compatible, positive_signals=positive_matched,
-            negative_signals=negative_matched, evidence=evidence_lines,
-            decision=decision, reason=reason
+            occasion=norm_occ, confidence=three_state.confidence, primary_occasion=three_state.primary_occasion,
+            compatible_occasions=cls._detect_all_occasions(build_normalized_product_text(product), norm_occ),
+            positive_signals=three_state.positive_signals,
+            negative_signals=three_state.negative_signals,
+            evidence=evidence_lines,
+            decision=decision, reason=three_state.reason,
+            three_state_decision=three_state.status
         )
 
     @classmethod
@@ -692,7 +891,7 @@ class OccasionClassifier:
             norm_text = build_normalized_product_text(product_or_text)
         else:
             norm_text = str(product_or_text).lower()
-        best_occ = "casual"
+        best_occ = "ambiguous"
         best_score = 0.0
         for occ_key, profile in OCCASION_TAXONOMY.items():
             score = sum(w for kw, w in profile.get("positive", []) if kw.lower() in norm_text)
@@ -704,6 +903,8 @@ class OccasionClassifier:
             if net > best_score:
                 best_score = net
                 best_occ = occ_key
+        if best_score < 4.0:
+            return "ambiguous", 0.0
         return best_occ, best_score
 
     @classmethod
@@ -829,9 +1030,14 @@ OCCASION_QUERY_FAMILIES = {
         "women silk wedding guest dress", "women chiffon wedding dress",
     ],
     "formal": [
-        "women formal dress", "women formal sheath dress", "women formal gown",
-        "women elegant formal dress", "women tailored formal dress",
-        "women formal midi dress", "women black tie gown", "women sophisticated formal dress",
+        "women's formal dress",
+        "women's business formal dress",
+        "women's tailored formal midi dress",
+        "women's structured sheath dress for formal occasions",
+        "women's elegant formal occasion dress",
+        "women's professional formalwear dress",
+        "women's black tie evening gown",
+        "women's floor length formal gala gown",
     ],
     "office": [
         "women office dress", "women workwear dress", "women formal office midi dress",
@@ -904,29 +1110,39 @@ def get_occasion_search_queries(requested_occasion, season="", colors=None,
                                 retailer=None, price_cue="", max_queries=10):
     """Generate occasion-specific search queries for SerpApi."""
     norm_occ = normalize_occasion(requested_occasion)
-    base_queries = OCCASION_QUERY_FAMILIES.get(norm_occ, [f"women {norm_occ} dress"])
+    base_queries = OCCASION_QUERY_FAMILIES.get(norm_occ, [f"women's {norm_occ} dress" if norm_occ == "formal" else f"women {norm_occ} dress"])
     season_term = (season or "").lower().strip()
     if season_term in ("all", ""):
         season_term = ""
     queries = []
+
+    # Priority 1: Base focused occasion queries
+    for base in base_queries:
+        q = base
+        if retailer and retailer.lower() not in ("all", "all retailers", ""):
+            q = f"{retailer} {q}"
+        if season_term:
+            q += f" {season_term}"
+        if price_cue:
+            q += f" {price_cue}"
+        queries.append(q.strip())
+
+    # Priority 2: Color combinations
     if colors:
         for color in colors[:3]:
-            q = f"women {color} {norm_occ} dress"
+            if norm_occ == "formal":
+                q = f"women's {color} business formal dress"
+            else:
+                q = f"women {color} {norm_occ} dress"
+            if retailer and retailer.lower() not in ("all", "all retailers", ""):
+                q = f"{retailer} {q}"
             if season_term:
                 q += f" {season_term}"
             if price_cue:
                 q += f" {price_cue}"
             queries.append(q.strip())
-    for base in base_queries:
-        q = base
-        if season_term:
-            q += f" {season_term}"
-        if price_cue:
-            q += f" {price_cue}"
-        if retailer and retailer.lower() not in ("all", "all retailers", ""):
-            q += f" {retailer}"
-        queries.append(q.strip())
-    if season_term:
+
+    if season_term and norm_occ != "formal":
         season_dress_types = {
             "summer": ["sundress", "cotton dress", "linen dress", "floral dress"],
             "winter": ["knit dress", "sweater dress", "velvet dress"],
@@ -938,6 +1154,7 @@ def get_occasion_search_queries(requested_occasion, season="", colors=None,
             if price_cue:
                 q += f" {price_cue}"
             queries.append(q.strip())
+
     seen = set()
     deduped = []
     for q in queries:

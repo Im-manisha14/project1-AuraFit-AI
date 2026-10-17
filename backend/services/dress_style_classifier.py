@@ -609,7 +609,7 @@ def is_style_compatible(product: Any, requested_occasion: str) -> Tuple[bool, st
         # 2. Require positive evidence of formal/business suitability
         positive_formal_patterns = [
             r'\b(formal|formal\s+wear|formal\s+dress|formal\s+midi|formal\s+gown|evening\s+gown|floor\s+length\s+gown|black\s+tie|gala)\b',
-            r'\b(tailored|structured|blazer\s+dress|pencil\s+dress|business\s+formal|tailored\s+sheath|structured\s+sheath|crepe\s+sheath|ponte\s+sheath)\b',
+            r'\b(tailored|structured|blazer\s+dress|blazer\s+sheath|pencil\s+dress|business\s+formal|tailored\s+sheath|structured\s+sheath|crepe\s+sheath|ponte\s+sheath)\b',
         ]
         has_positive_formal = any(re.search(pat, text) for pat in positive_formal_patterns)
 

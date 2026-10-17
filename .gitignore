@@ -55,3 +55,4 @@ logs/
 # Build
 frontend/build/
 backend/instance/
+artifacts_screenshots/

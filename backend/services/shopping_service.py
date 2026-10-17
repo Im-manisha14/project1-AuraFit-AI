@@ -1352,25 +1352,46 @@ class SerpApiShoppingService:
 
             # PASS 5: Retailer-targeted occasion queries
             if retailer:
-                p5 = [
-                    f"{retailer} women {norm_occ_key} dress {p_cue}".strip(),
-                    f"{retailer} women dress {p_cue}".strip()
-                ]
+                if norm_occ_key == 'formal':
+                    p5 = [
+                        f"{retailer} women's formal dress {p_cue}".strip(),
+                        f"{retailer} women's business formal dress {p_cue}".strip(),
+                    ]
+                else:
+                    p5 = [
+                        f"{retailer} women {norm_occ_key} dress {p_cue}".strip(),
+                    ]
             else:
-                p5 = [
-                    f"women {norm_occ_key} dress myntra {p_cue}".strip(),
-                    f"women {norm_occ_key} dress amazon india {p_cue}".strip(),
-                    f"women {norm_occ_key} dress ajio {p_cue}".strip(),
-                    f"women {norm_occ_key} dress tatacliq {p_cue}".strip(),
-                ]
+                if norm_occ_key == 'formal':
+                    p5 = [
+                        f"women's formal dress myntra {p_cue}".strip(),
+                        f"women's formal dress amazon india {p_cue}".strip(),
+                        f"women's business formal dress ajio {p_cue}".strip(),
+                        f"women's tailored formal dress tatacliq {p_cue}".strip(),
+                    ]
+                else:
+                    p5 = [
+                        f"women {norm_occ_key} dress myntra {p_cue}".strip(),
+                        f"women {norm_occ_key} dress amazon india {p_cue}".strip(),
+                        f"women {norm_occ_key} dress ajio {p_cue}".strip(),
+                        f"women {norm_occ_key} dress tatacliq {p_cue}".strip(),
+                    ]
             passes.append([q for q in p5 if q])
 
             # PASS 6: Additional colors from skin-tone palette with occasion preserved
-            p6 = [f"women {col} {norm_occ_key} dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
+            if norm_occ_key == 'formal':
+                p6 = [f"women's {col} tailored formal dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
+            else:
+                p6 = [f"women {col} {norm_occ_key} dress {p_cue}".strip() for col in (palette or DEFAULT_SKIN_PALETTE)[4:8]]
             passes.append([q for q in p6 if q])
 
             # PASS 7: Occasion-specific styling fallback
-            if norm_occ_key in ('traditional', 'festive'):
+            if norm_occ_key == 'formal':
+                p7 = [
+                    f"women's structured sheath dress for formal occasions {p_cue}".strip(),
+                    f"women's professional formalwear dress {p_cue}".strip()
+                ]
+            elif norm_occ_key in ('traditional', 'festive'):
                 p7 = [
                     f"women ethnic anarkali dress {norm_occ_key} {p_cue}".strip(),
                     f"women kurti dress {norm_occ_key} {p_cue}".strip()
@@ -1383,10 +1404,16 @@ class SerpApiShoppingService:
             passes.append([q for q in p7 if q])
 
             # PASS 8: Occasion collection fallback
-            p8 = [
-                f"women {norm_occ_key} dress online india {p_cue}".strip(),
-                f"women {norm_occ_key} dress collection {p_cue}".strip()
-            ]
+            if norm_occ_key == 'formal':
+                p8 = [
+                    f"women's black tie evening gown {p_cue}".strip(),
+                    f"women's floor length formal gala gown {p_cue}".strip()
+                ]
+            else:
+                p8 = [
+                    f"women {norm_occ_key} dress online india {p_cue}".strip(),
+                    f"women {norm_occ_key} dress collection {p_cue}".strip()
+                ]
             passes.append([q for q in p8 if q])
 
         else:  # Male
@@ -1554,15 +1581,16 @@ class SerpApiShoppingService:
         occ_low = (occasion or '').lower()
         seas_low = (season or '').lower()
 
-        # Occasion relevance: +35 if match, -25 if conflicting
+        # Occasion relevance: +40 if SUITABLE, -15 if UNCERTAIN, -50 if UNSUITABLE
         if occ_low and occ_low != 'all':
-            occ_res = OccasionClassifier.classify({'title': title}, occ_low, debug=False)
-            if occ_res.decision == 'ACCEPT':
-                score += 35.0 * max(0.5, occ_res.confidence)
-            elif occ_res.decision == 'SECONDARY':
-                score += 15.0 * max(0.3, occ_res.confidence)
+            from services.occasion_classifier import OccasionDecision
+            dec = OccasionClassifier.classify_occasion_decision({'title': title}, occ_low)
+            if dec.status == OccasionDecision.SUITABLE:
+                score += 40.0 * max(0.5, dec.confidence)
+            elif dec.status == OccasionDecision.UNCERTAIN:
+                score -= 15.0 if occ_low == 'formal' else 0.0
             else:
-                score -= 25.0
+                score -= 50.0
         else:
             score += 10.0
 
@@ -2136,7 +2164,7 @@ class SerpApiShoppingService:
                 product_url=direct_url,
                 gender=c.get('det_gender') if c.get('det_gender') in ('female', 'male', 'unisex') else norm_gender,
                 category=target_category,
-                occasion=OccasionClassifier.detect_primary_occasion({'title': title}) or OCCASION_DB_MAP.get(occasion.lower(), 'casual'),
+                occasion=OccasionClassifier.detect_primary_occasion(it) or 'ambiguous',
                 season=season if season != 'all' else 'all',
                 colors=c['colors'],
                 additional_images=extra_imgs,
@@ -2467,8 +2495,14 @@ class SerpApiShoppingService:
         """Upsert a live product into the Outfit table so detail routes can load it with 100% identity."""
         try:
             # Step 5 & 6: Determine occasion and season deterministically from the product itself
-            p_data = {'title': title, 'category': category, 'store': retailer, 'brand': brand, 'description': f"{retailer} {category}"}
-            det_occ = OccasionClassifier.detect_primary_occasion(p_data) or 'casual'
+            p_data = {'title': title, 'category': category, 'store': retailer, 'brand': brand, 'description': title}
+            det_occ = OccasionClassifier.detect_primary_occasion(p_data)
+            if not det_occ or det_occ in ('ambiguous', 'unknown'):
+                det_3state = OccasionClassifier.classify_occasion_decision(p_data, 'formal')
+                if det_3state.status == 'SUITABLE':
+                    det_occ = 'formal'
+                else:
+                    det_occ = 'ambiguous'
             det_season = SeasonClassifier.detect_primary_season(p_data) or 'all'
 
             canon_u = self.canonicalize_url(product_url)
@@ -2501,7 +2535,8 @@ class SerpApiShoppingService:
                 existing.gender = gender
                 existing.category = category
                 existing.colors = colors
-                existing.occasion = det_occ
+                if det_occ != 'ambiguous':
+                    existing.occasion = det_occ
                 existing.season = det_season
                 existing.in_stock = True
                 existing.purchasable = True
@@ -2513,7 +2548,7 @@ class SerpApiShoppingService:
             new_outfit = Outfit(
                 external_id=external_id,
                 name=title,
-                description=f"Live {retailer} {category} curated for {det_occ} wear.",
+                description=f"{brand or retailer} {title}" if brand else title,
                 category=category,
                 gender=gender,
                 colors=colors,

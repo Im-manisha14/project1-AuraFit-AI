@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, Set, Tuple, List
 
 from services.occasion_classifier import (
     OccasionClassifier,
+    OccasionDecision,
     SeasonClassifier,
     normalize_occasion,
     normalize_season,
@@ -267,8 +268,8 @@ def check_category_suitability(
                 # If it's a "shirt dress", "t-shirt dress", or "sweater dress", that's allowed!
                 if cat_name == 'tops' and re.search(r'\b(shirt\s+dress|t-shirt\s+dress|tshirt\s+dress|tee\s+dress|sweater\s+dress)\b', t):
                     continue
-                # If it's a "blazer dress" or "coat dress", that's allowed!
-                if cat_name == 'jackets' and re.search(r'\b(blazer\s+dress|coat\s+dress)\b', t):
+                # If it's a "blazer dress", "blazer sheath dress", "blazer midi dress", or "coat dress", that's allowed!
+                if cat_name == 'jackets' and re.search(r'\b(?:blazer|coat)(?:\s+(?:sheath|midi|maxi|mini|formal|tailored|wrap))?\s+dress\b', t):
                     continue
                 # If dress comes with a belt
                 if cat_name == 'accessories' and re.search(r'\b(with\s+belt|belted|tie\s+belt)\b', t):
@@ -570,6 +571,12 @@ def validate_live_product(
         occ_res = val_details.get('occasion_res') or OccasionClassifier.classify(c, norm_occ, debug=False)
         occ_conf = val_details.get('confidence', 0.85)
 
+        # Phase 3 Authoritative 3-state check: Only SUITABLE products pass strict Formal recommendations
+        if norm_occ == 'formal':
+            occ_3state = OccasionClassifier.classify_occasion_decision(c, norm_occ)
+            if occ_3state.status != OccasionDecision.SUITABLE:
+                return {"accepted": False, "reason": f"Formal occasion validation failed: {occ_3state.reason}", "normalized_product": None}
+
     # Phase 12: Cross-occasion duplicate protection
     if occasion_registry is not None and norm_occ not in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape'):
         registered_occ = occasion_registry.get(identity_key) or (occasion_registry.get(canon_url) if canon_url else None) or (occasion_registry.get(img_key) if img_key else None)
@@ -652,7 +659,8 @@ def validate_live_product(
         'name': title,
         'gender': norm_target_g,
         'category': det_c,
-        'occasion': primary_occ if (norm_occ in ('all', 'trending', 'seasonal', 'skin_tone', 'body_shape')) else norm_occ,
+        'occasion': primary_occ if primary_occ not in ('ambiguous', 'unknown') else norm_occ,
+        'primary_occasion': primary_occ,
         'season': norm_seas,
         'dress_style': style_info.get('style', primary_occ),
         'is_bodycon': style_info.get('is_bodycon', False),
