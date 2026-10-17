@@ -488,9 +488,9 @@ class ProductValidator:
                     return False, cat_name, f"URL path belongs to excluded category {cat_name}"
 
         # Section 9 & 10: Hard Category Exclusion List
-        # Mask approved dress compounds so their sub-words (e.g. shirt in "shirt dress") don't trigger top exclusions
+        # Mask approved dress compounds so their sub-words (e.g. shirt in "shirt dress", blazer in "blazer sheath dress") don't trigger top exclusions
         t_masked = re.sub(
-            r'\b(?:shirt|t-shirt|tshirt|tee|sweater|blazer|jacket|hoodie|sweatshirt|slip|camisole)\s+dress(?:es)?\b',
+            r'\b(?:shirt|t-shirt|tshirt|tee|sweater|blazer|jacket|hoodie|sweatshirt|slip|camisole)(?:\s+(?:sheath|midi|maxi|mini|formal|tailored|wrap))?\s+dress(?:es)?\b',
             '[DRESS_COMPOUND]',
             normalized_text,
             flags=re.IGNORECASE
